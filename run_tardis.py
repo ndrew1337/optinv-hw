@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -120,6 +122,18 @@ def parse_pairs(pair_args):
     return _dedupe_preserve_order([normalize_pair(pair) for pair in pair_args])
 
 
+def configure_runtime(root: Path) -> None:
+    """Keep long L2 runs chatty and avoid Matplotlib writing outside the repo."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(line_buffering=True)
+
+    mpl_config = root / ".cache" / "matplotlib"
+    mpl_config.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", str(mpl_config))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default="2026-05-01", help="First day of a month (free tier)")
@@ -156,6 +170,7 @@ def main() -> None:
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent
+    configure_runtime(root)
     raw_dir = root / "data" / "tardis" / "raw"
     grid_dir = root / "data" / "tardis" / "grid"
     results = root / "results"
