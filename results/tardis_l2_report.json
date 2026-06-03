@@ -16,12 +16,12 @@
   "book_depth_levels": 5,
   "grid_ms": 100,
   "max_quote_age_ms": 250,
-  "model": "pre-funded inventory, slippage via order-book walking, latency-shifted execution (decide at t, fill on first grid point at/after t+Δ), stale forward-filled books capped by max_quote_age_ms",
+  "model": "pre-funded inventory, slippage via order-book walking, latency-shifted execution (decide at t, fill on first grid point at/after t+Δ), spot buy fee deducted from base asset, spot sell fee deducted from quote proceeds, stale forward-filled books capped by max_quote_age_ms",
   "scenarios": [
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531808,
-      "executable_candidates": 1531808,
+      "executable_candidates": 0,
       "trades_executed": 0,
       "total_pnl_usdt": 0.0,
       "total_return_pct": 0.0,
@@ -37,7 +37,7 @@
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531802,
-      "executable_candidates": 1317910,
+      "executable_candidates": 0,
       "trades_executed": 0,
       "total_pnl_usdt": 0.0,
       "total_return_pct": 0.0,
@@ -53,38 +53,38 @@
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531808,
-      "executable_candidates": 1531808,
-      "trades_executed": 27,
-      "total_pnl_usdt": 36.11408529886876,
-      "total_return_pct": 0.3611408529886839,
-      "final_capital": 10036.114085298868,
-      "avg_trade_pnl": 1.3375587147729169,
+      "executable_candidates": 31,
+      "trades_executed": 31,
+      "total_pnl_usdt": 38.63137811380034,
+      "total_return_pct": 0.3863137811380035,
+      "final_capital": 10038.6313781138,
+      "avg_trade_pnl": 1.2461734875419463,
       "by_asset": {
         "ETH": {
-          "trades": 19,
-          "pnl": 25.895
+          "trades": 22,
+          "pnl": 27.7034
         },
         "BTC": {
-          "trades": 8,
-          "pnl": 10.2191
+          "trades": 9,
+          "pnl": 10.928
         }
       },
       "by_route": {
         "binance->bybit": {
-          "trades": 12,
-          "pnl": 15.7569
+          "trades": 15,
+          "pnl": 18.0091
         },
         "binance->okx": {
           "trades": 10,
-          "pnl": 12.5027
+          "pnl": 12.5013
         },
         "bybit->binance": {
-          "trades": 2,
-          "pnl": 2.1276
+          "trades": 3,
+          "pnl": 2.3948
         },
         "okx->binance": {
           "trades": 3,
-          "pnl": 5.7269
+          "pnl": 5.7263
         }
       },
       "scenario": "Комиссия 0.01%, БЕЗ задержки",
@@ -95,38 +95,38 @@
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531806,
-      "executable_candidates": 1418594,
-      "trades_executed": 11,
-      "total_pnl_usdt": 14.534731898198515,
-      "total_return_pct": 0.14534731898199205,
-      "final_capital": 10014.534731898199,
-      "avg_trade_pnl": 1.3213392634725922,
+      "executable_candidates": 31,
+      "trades_executed": 31,
+      "total_pnl_usdt": -0.40303797271735675,
+      "total_return_pct": -0.0040303797271712405,
+      "final_capital": 9999.596962027283,
+      "avg_trade_pnl": -0.013001224926366347,
       "by_asset": {
         "ETH": {
-          "trades": 9,
-          "pnl": 11.9233
+          "trades": 22,
+          "pnl": -1.0147
         },
         "BTC": {
-          "trades": 2,
-          "pnl": 2.6114
+          "trades": 9,
+          "pnl": 0.6117
         }
       },
       "by_route": {
         "binance->bybit": {
-          "trades": 4,
-          "pnl": 5.2197
+          "trades": 15,
+          "pnl": 1.3665
         },
         "binance->okx": {
-          "trades": 3,
-          "pnl": 3.6214
-        },
-        "okx->binance": {
-          "trades": 2,
-          "pnl": 3.1552
+          "trades": 10,
+          "pnl": 0.4355
         },
         "bybit->binance": {
-          "trades": 2,
-          "pnl": 2.5384
+          "trades": 3,
+          "pnl": -1.2688
+        },
+        "okx->binance": {
+          "trades": 3,
+          "pnl": -0.9362
         }
       },
       "scenario": "Комиссия 0.01%, задержка 100мс",
@@ -137,38 +137,38 @@
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531802,
-      "executable_candidates": 1317910,
-      "trades_executed": 9,
-      "total_pnl_usdt": 11.31695537189762,
-      "total_return_pct": 0.11316955371898363,
-      "final_capital": 10011.316955371898,
-      "avg_trade_pnl": 1.2574394857664022,
+      "executable_candidates": 31,
+      "trades_executed": 31,
+      "total_pnl_usdt": -8.412819888233344,
+      "total_return_pct": -0.08412819888233836,
+      "final_capital": 9991.587180111766,
+      "avg_trade_pnl": -0.27138128671720463,
       "by_asset": {
         "ETH": {
-          "trades": 8,
-          "pnl": 10.2644
+          "trades": 22,
+          "pnl": -5.9168
         },
         "BTC": {
-          "trades": 1,
-          "pnl": 1.0525
+          "trades": 9,
+          "pnl": -2.496
         }
       },
       "by_route": {
         "binance->bybit": {
-          "trades": 5,
-          "pnl": 6.3442
+          "trades": 15,
+          "pnl": -3.5439
         },
         "binance->okx": {
-          "trades": 1,
-          "pnl": 1.0525
-        },
-        "okx->binance": {
-          "trades": 1,
-          "pnl": 1.3819
+          "trades": 10,
+          "pnl": -3.9384
         },
         "bybit->binance": {
-          "trades": 2,
-          "pnl": 2.5384
+          "trades": 3,
+          "pnl": -0.758
+        },
+        "okx->binance": {
+          "trades": 3,
+          "pnl": -0.1724
         }
       },
       "scenario": "Комиссия 0.01%, задержка 250мс",
@@ -179,38 +179,38 @@
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531802,
-      "executable_candidates": 1317910,
-      "trades_executed": 9,
-      "total_pnl_usdt": 11.31695537189762,
-      "total_return_pct": 0.11316955371898363,
-      "final_capital": 10011.316955371898,
-      "avg_trade_pnl": 1.2574394857664022,
+      "executable_candidates": 31,
+      "trades_executed": 31,
+      "total_pnl_usdt": -8.412819888233344,
+      "total_return_pct": -0.08412819888233836,
+      "final_capital": 9991.587180111766,
+      "avg_trade_pnl": -0.27138128671720463,
       "by_asset": {
         "ETH": {
-          "trades": 8,
-          "pnl": 10.2644
+          "trades": 22,
+          "pnl": -5.9168
         },
         "BTC": {
-          "trades": 1,
-          "pnl": 1.0525
+          "trades": 9,
+          "pnl": -2.496
         }
       },
       "by_route": {
         "binance->bybit": {
-          "trades": 5,
-          "pnl": 6.3442
+          "trades": 15,
+          "pnl": -3.5439
         },
         "binance->okx": {
-          "trades": 1,
-          "pnl": 1.0525
-        },
-        "okx->binance": {
-          "trades": 1,
-          "pnl": 1.3819
+          "trades": 10,
+          "pnl": -3.9384
         },
         "bybit->binance": {
-          "trades": 2,
-          "pnl": 2.5384
+          "trades": 3,
+          "pnl": -0.758
+        },
+        "okx->binance": {
+          "trades": 3,
+          "pnl": -0.1724
         }
       },
       "scenario": "Комиссия 0.01%, задержка 300мс",
@@ -221,34 +221,38 @@
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531798,
-      "executable_candidates": 1303978,
-      "trades_executed": 9,
-      "total_pnl_usdt": 13.946080061569546,
-      "total_return_pct": 0.13946080061568722,
-      "final_capital": 10013.946080061569,
-      "avg_trade_pnl": 1.5495644512855051,
+      "executable_candidates": 31,
+      "trades_executed": 31,
+      "total_pnl_usdt": -9.196446989123615,
+      "total_return_pct": -0.09196446989124807,
+      "final_capital": 9990.803553010875,
+      "avg_trade_pnl": -0.29665958029431017,
       "by_asset": {
         "ETH": {
-          "trades": 8,
-          "pnl": 12.8599
+          "trades": 22,
+          "pnl": -6.4206
         },
         "BTC": {
-          "trades": 1,
-          "pnl": 1.0862
+          "trades": 9,
+          "pnl": -2.7758
         }
       },
       "by_route": {
         "binance->bybit": {
-          "trades": 5,
-          "pnl": 6.3912
+          "trades": 15,
+          "pnl": -4.4108
+        },
+        "binance->okx": {
+          "trades": 10,
+          "pnl": -2.9595
+        },
+        "bybit->binance": {
+          "trades": 3,
+          "pnl": -1.3825
         },
         "okx->binance": {
           "trades": 3,
-          "pnl": 6.5253
-        },
-        "bybit->binance": {
-          "trades": 1,
-          "pnl": 1.0296
+          "pnl": -0.4436
         }
       },
       "scenario": "Комиссия 0.01%, задержка 500мс",
@@ -259,38 +263,38 @@
     {
       "grid_points": 854089,
       "raw_cross_candidates": 1531808,
-      "executable_candidates": 1531808,
-      "trades_executed": 96,
-      "total_pnl_usdt": 126.29664012056696,
-      "total_return_pct": 1.2629664012056674,
-      "final_capital": 10126.296640120567,
-      "avg_trade_pnl": 1.3155900012559059,
+      "executable_candidates": 109,
+      "trades_executed": 109,
+      "total_pnl_usdt": 135.02040204365136,
+      "total_return_pct": 1.3502040204365295,
+      "final_capital": 10135.020402043652,
+      "avg_trade_pnl": 1.2387192848041408,
       "by_asset": {
         "ETH": {
-          "trades": 60,
-          "pnl": 81.2681
+          "trades": 71,
+          "pnl": 88.2472
         },
         "BTC": {
-          "trades": 36,
-          "pnl": 45.0285
+          "trades": 38,
+          "pnl": 46.7732
         }
       },
       "by_route": {
         "binance->okx": {
-          "trades": 32,
-          "pnl": 41.9868
+          "trades": 35,
+          "pnl": 44.2888
         },
         "binance->bybit": {
-          "trades": 37,
-          "pnl": 49.324
+          "trades": 42,
+          "pnl": 52.9759
         },
         "okx->binance": {
-          "trades": 15,
-          "pnl": 20.888
+          "trades": 16,
+          "pnl": 20.9307
         },
         "bybit->binance": {
-          "trades": 9,
-          "pnl": 10.858
+          "trades": 13,
+          "pnl": 13.5852
         },
         "okx->bybit": {
           "trades": 2,

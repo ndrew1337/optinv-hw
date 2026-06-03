@@ -21,6 +21,9 @@ from src.tardis_backtest import L2Config, run_l2_backtest
 from src.tardis_data import load_l2_panels
 
 
+DEFAULT_FEES_PCT = [0.0, 0.01, 0.1]
+DEFAULT_LATENCIES_MS = [0, 100, 300, 500]
+
 TRADE_COLUMNS = [
     "signal_ts_ms", "exec_ts_ms", "asset", "buy_ex", "sell_ex", "size",
     "buy_cost", "sell_proceeds", "pnl", "signal_edge_bps", "signal_expected_pnl",
@@ -38,6 +41,52 @@ def write_trades_csv(trades, path: Path) -> None:
     } for t in trades], columns=TRADE_COLUMNS).to_csv(path, index=False)
 
 
+def _dedupe_preserve_order(values):
+    out = []
+    seen = set()
+    for value in values:
+        if value in seen:
+            continue
+        out.append(value)
+        seen.add(value)
+    return out
+
+
+def _number_tag(value: float) -> str:
+    return f"{value:g}".replace("-", "m").replace(".", "p")
+
+
+def scenario_key(date: str, fee_pct: float, latency_ms: int) -> str:
+    date_tag = date.replace("-", "")
+    return f"{date_tag}_fee{_number_tag(fee_pct)}pct_lat{latency_ms}"
+
+
+def scenario_title(fee_pct: float, latency_ms: int) -> str:
+    fee_label = "Без комиссий" if fee_pct == 0 else f"Комиссия {fee_pct:g}%"
+    latency_label = "без задержки" if latency_ms == 0 else f"задержка {latency_ms}мс"
+    return f"{fee_label}, {latency_label}"
+
+
+def build_scenarios(date: str, fees_pct, latencies_ms, cfg_factory):
+    scenarios = []
+    for fee_pct in _dedupe_preserve_order(fees_pct):
+        if fee_pct < 0:
+            raise ValueError(f"Fee percent must be non-negative: {fee_pct}")
+        for latency_ms in _dedupe_preserve_order(latencies_ms):
+            if latency_ms < 0:
+                raise ValueError(f"Latency must be non-negative: {latency_ms}")
+            fee = fee_pct / 100.0
+            scenarios.append(
+                (
+                    scenario_key(date, fee_pct, latency_ms),
+                    scenario_title(fee_pct, latency_ms),
+                    fee_pct,
+                    cfg_factory(fee, latency_ms),
+                )
+            )
+    return scenarios
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default="2026-05-01", help="First day of a month (free tier)")
@@ -53,6 +102,10 @@ def main() -> None:
                     help="Time-grid resolution in ms")
     ap.add_argument("--max-quote-age-ms", type=int, default=250,
                     help="Drop forward-filled books older than this many ms")
+    ap.add_argument("--fees-pct", nargs="+", type=float, default=DEFAULT_FEES_PCT,
+                    help="Spot taker fee per leg in percent, e.g. 0 0.01 0.1")
+    ap.add_argument("--latencies-ms", nargs="+", type=int, default=DEFAULT_LATENCIES_MS,
+                    help="Execution latencies to sweep in milliseconds")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent
@@ -86,33 +139,19 @@ def main() -> None:
                         latency_ms=lat_ms, grid_ms=args.grid_ms,
                         max_quote_age_ms=args.max_quote_age_ms)
 
-    # Two experiments:
-    #  (1) NO DELAY (latency 0) — best case, isolates the effect of fees.
-    #  (2) WITH DELAY — execution shifted to t+Δ on the real book; Δ swept to
-    #      show how a realistic latency erodes the edge.
-    scenarios = [
-        # retail taker fee: no delay vs delay (fees alone should kill it)
-        ("l2_taker_0p10_lat0",   "Тейкер 0.10%, БЕЗ задержки",        cfg(0.0010, 0)),
-        ("l2_taker_0p10_lat250", "Тейкер 0.10%, задержка 250мс",      cfg(0.0010, 250)),
-        # near-zero fee (HFT/maker tier): latency sweep shows the decay
-        ("l2_fee_0p01_lat0",     "Комиссия 0.01%, БЕЗ задержки",      cfg(0.0001, 0)),
-        ("l2_fee_0p01_lat100",   "Комиссия 0.01%, задержка 100мс",    cfg(0.0001, 100)),
-        ("l2_fee_0p01_lat250",   "Комиссия 0.01%, задержка 250мс",    cfg(0.0001, 250)),
-        ("l2_fee_0p01_lat300",   "Комиссия 0.01%, задержка 300мс",    cfg(0.0001, 300)),
-        ("l2_fee_0p01_lat500",   "Комиссия 0.01%, задержка 500мс",    cfg(0.0001, 500)),
-        # zero-fee, no-delay ceiling
-        ("l2_no_fees_lat0",      "Без комиссий, БЕЗ задержки (потолок)", cfg(0.0, 0)),
-    ]
+    scenarios = build_scenarios(args.date, args.fees_pct, args.latencies_ms, cfg)
+    date_tag = args.date.replace("-", "")
 
     summaries = []
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(10, 4))
-    for key, title, cfg in scenarios:
+    for key, title, fee_pct, cfg in scenarios:
         print(f"\nRunning: {title}")
         res = run_l2_backtest(panels, cfg)
         s = res.summary()
         s["scenario"] = title
+        s["fee_pct"] = fee_pct
         s["fee_per_leg"] = cfg.fee
         s["latency_ms"] = cfg.latency_ms
         s["max_quote_age_ms"] = cfg.max_quote_age_ms
@@ -132,7 +171,10 @@ def main() -> None:
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(results / "tardis_equity.png", dpi=120)
+    dated_plot_path = results / f"tardis_equity_{date_tag}.png"
+    latest_plot_path = results / "tardis_equity.png"
+    fig.savefig(dated_plot_path, dpi=120)
+    fig.savefig(latest_plot_path, dpi=120)
     plt.close()
 
     meta = {
@@ -146,6 +188,8 @@ def main() -> None:
         "book_depth_levels": args.depth,
         "grid_ms": args.grid_ms,
         "max_quote_age_ms": args.max_quote_age_ms,
+        "fees_pct": args.fees_pct,
+        "latencies_ms": args.latencies_ms,
         "model": "pre-funded inventory, slippage via order-book walking, "
                  "latency-shifted execution (decide at t, fill on first grid point "
                  "at/after t+Δ), spot buy fee deducted from base asset, spot sell fee "
@@ -153,10 +197,14 @@ def main() -> None:
                  "max_quote_age_ms",
         "scenarios": summaries,
     }
-    with open(results / "tardis_l2_report.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
+    dated_report_path = results / f"tardis_l2_report_{date_tag}.json"
+    latest_report_path = results / "tardis_l2_report.json"
+    for path in (dated_report_path, latest_report_path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, ensure_ascii=False)
 
-    print(f"\nSaved: {results}/tardis_l2_report.json, tardis_equity.png")
+    print(f"\nSaved: {dated_report_path}, {dated_plot_path}")
+    print(f"Latest aliases: {latest_report_path}, {latest_plot_path}")
 
 
 if __name__ == "__main__":

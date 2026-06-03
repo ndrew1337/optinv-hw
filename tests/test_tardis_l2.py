@@ -240,3 +240,32 @@ def test_write_trades_csv_overwrites_empty_trade_files(tmp_path: Path):
     df = pd.read_csv(stale)
     assert list(df.columns) == run_tardis.TRADE_COLUMNS
     assert df.empty
+
+
+def test_build_scenarios_sweeps_fee_percent_and_latency_grid():
+    scenarios = run_tardis.build_scenarios(
+        "2026-05-01",
+        [0.0, 0.01, 0.1],
+        [0, 300],
+        lambda fee, latency_ms: L2Config(fee=fee, latency_ms=latency_ms),
+    )
+
+    assert [s[0] for s in scenarios] == [
+        "20260501_fee0pct_lat0",
+        "20260501_fee0pct_lat300",
+        "20260501_fee0p01pct_lat0",
+        "20260501_fee0p01pct_lat300",
+        "20260501_fee0p1pct_lat0",
+        "20260501_fee0p1pct_lat300",
+    ]
+    assert [s[1] for s in scenarios] == [
+        "Без комиссий, без задержки",
+        "Без комиссий, задержка 300мс",
+        "Комиссия 0.01%, без задержки",
+        "Комиссия 0.01%, задержка 300мс",
+        "Комиссия 0.1%, без задержки",
+        "Комиссия 0.1%, задержка 300мс",
+    ]
+    assert [s[3].fee for s in scenarios] == pytest.approx(
+        [0.0, 0.0, 0.0001, 0.0001, 0.001, 0.001]
+    )

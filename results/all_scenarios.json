@@ -1,6 +1,6 @@
 [
   {
-    "bars_scanned": 4032,
+    "bars_scanned": 4031,
     "opportunities_found": 0,
     "trades_executed": 0,
     "final_capital": 10000.0,
@@ -13,7 +13,7 @@
     "with_fees": true
   },
   {
-    "bars_scanned": 4032,
+    "bars_scanned": 4031,
     "opportunities_found": 0,
     "trades_executed": 0,
     "final_capital": 10000.0,
@@ -26,27 +26,27 @@
     "with_fees": false
   },
   {
-    "bars_scanned": 1439,
+    "bars_scanned": 1438,
     "opportunities_found": 69,
     "trades_executed": 58,
-    "final_capital": 10100.954771649762,
-    "total_return_pct": 1.0095477164976163,
-    "max_drawdown_pct": 0.0,
-    "sharpe_annualized": 53.97548889554976,
-    "avg_trade_pnl": 1.7405995112028332,
+    "final_capital": 9773.155893800165,
+    "total_return_pct": -2.2684410619983497,
+    "max_drawdown_pct": -2.268441061998346,
+    "sharpe_annualized": -66.29607891877305,
+    "avg_trade_pnl": -3.91110527930744,
     "scenario": "Межбиржевой + комиссии (лаг 1 бар)",
     "mode": "cross",
     "with_fees": true
   },
   {
-    "bars_scanned": 1439,
-    "opportunities_found": 1439,
-    "trades_executed": 1439,
-    "final_capital": 10764.817586313658,
-    "total_return_pct": 7.64113742782091,
-    "max_drawdown_pct": 0.0,
-    "sharpe_annualized": 947.0584228293734,
-    "avg_trade_pnl": 0.53149241578431,
+    "bars_scanned": 1438,
+    "opportunities_found": 1438,
+    "trades_executed": 1438,
+    "final_capital": 10149.825963712658,
+    "total_return_pct": 1.4982596371265755,
+    "max_drawdown_pct": -0.024277354774310613,
+    "sharpe_annualized": 119.71850277496556,
+    "avg_trade_pnl": 0.1041905171854187,
     "scenario": "Межбиржевой без комиссий",
     "mode": "cross",
     "with_fees": false

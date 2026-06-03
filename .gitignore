@@ -1,5 +1,3 @@
-data/cache/
-data/tardis/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
