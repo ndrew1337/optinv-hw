@@ -1,0 +1,19 @@
+{
+  "real_data_14d_5m": {
+    "bars": 4032,
+    "pairs": 11,
+    "max_gross_mult_fee0": 1.0000000000000007,
+    "bars_profitable_fee0": 646,
+    "max_gross_mult_fee01pct": 1.0,
+    "bars_profitable_fee01pct": 0
+  },
+  "synthetic_mispricing_fee_sweep": {
+    "0": 1.0005,
+    "0.0005": 1.0,
+    "0.001": 1.0,
+    "0.002": 1.0,
+    "0.005": 1.0,
+    "0.01": 1.0
+  },
+  "spread_stress_bps10": 1.002002002002002
+}

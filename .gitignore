@@ -1,0 +1,10 @@
+data/cache/
+data/tardis/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.claude/
+pptx_extracted/
+pptx_media/
+*.pyc
+.DS_Store

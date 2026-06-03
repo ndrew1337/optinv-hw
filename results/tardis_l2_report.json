@@ -1,0 +1,310 @@
+{
+  "data_source": "Tardis.dev free first-of-month L2 sample (book_snapshot_25)",
+  "date": "2026-05-01",
+  "venues": [
+    "binance",
+    "bybit",
+    "okx"
+  ],
+  "assets": [
+    "BTC",
+    "ETH"
+  ],
+  "max_notional_usdt": 2000.0,
+  "min_profit_usdt": 1.0,
+  "min_edge_bps": 1.0,
+  "book_depth_levels": 5,
+  "grid_ms": 100,
+  "max_quote_age_ms": 250,
+  "model": "pre-funded inventory, slippage via order-book walking, latency-shifted execution (decide at t, fill on first grid point at/after t+Δ), stale forward-filled books capped by max_quote_age_ms",
+  "scenarios": [
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531808,
+      "executable_candidates": 1531808,
+      "trades_executed": 0,
+      "total_pnl_usdt": 0.0,
+      "total_return_pct": 0.0,
+      "final_capital": 10000.0,
+      "avg_trade_pnl": 0.0,
+      "by_asset": {},
+      "by_route": {},
+      "scenario": "Тейкер 0.10%, БЕЗ задержки",
+      "fee_per_leg": 0.001,
+      "latency_ms": 0,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531802,
+      "executable_candidates": 1317910,
+      "trades_executed": 0,
+      "total_pnl_usdt": 0.0,
+      "total_return_pct": 0.0,
+      "final_capital": 10000.0,
+      "avg_trade_pnl": 0.0,
+      "by_asset": {},
+      "by_route": {},
+      "scenario": "Тейкер 0.10%, задержка 250мс",
+      "fee_per_leg": 0.001,
+      "latency_ms": 250,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531808,
+      "executable_candidates": 1531808,
+      "trades_executed": 27,
+      "total_pnl_usdt": 36.11408529886876,
+      "total_return_pct": 0.3611408529886839,
+      "final_capital": 10036.114085298868,
+      "avg_trade_pnl": 1.3375587147729169,
+      "by_asset": {
+        "ETH": {
+          "trades": 19,
+          "pnl": 25.895
+        },
+        "BTC": {
+          "trades": 8,
+          "pnl": 10.2191
+        }
+      },
+      "by_route": {
+        "binance->bybit": {
+          "trades": 12,
+          "pnl": 15.7569
+        },
+        "binance->okx": {
+          "trades": 10,
+          "pnl": 12.5027
+        },
+        "bybit->binance": {
+          "trades": 2,
+          "pnl": 2.1276
+        },
+        "okx->binance": {
+          "trades": 3,
+          "pnl": 5.7269
+        }
+      },
+      "scenario": "Комиссия 0.01%, БЕЗ задержки",
+      "fee_per_leg": 0.0001,
+      "latency_ms": 0,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531806,
+      "executable_candidates": 1418594,
+      "trades_executed": 11,
+      "total_pnl_usdt": 14.534731898198515,
+      "total_return_pct": 0.14534731898199205,
+      "final_capital": 10014.534731898199,
+      "avg_trade_pnl": 1.3213392634725922,
+      "by_asset": {
+        "ETH": {
+          "trades": 9,
+          "pnl": 11.9233
+        },
+        "BTC": {
+          "trades": 2,
+          "pnl": 2.6114
+        }
+      },
+      "by_route": {
+        "binance->bybit": {
+          "trades": 4,
+          "pnl": 5.2197
+        },
+        "binance->okx": {
+          "trades": 3,
+          "pnl": 3.6214
+        },
+        "okx->binance": {
+          "trades": 2,
+          "pnl": 3.1552
+        },
+        "bybit->binance": {
+          "trades": 2,
+          "pnl": 2.5384
+        }
+      },
+      "scenario": "Комиссия 0.01%, задержка 100мс",
+      "fee_per_leg": 0.0001,
+      "latency_ms": 100,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531802,
+      "executable_candidates": 1317910,
+      "trades_executed": 9,
+      "total_pnl_usdt": 11.31695537189762,
+      "total_return_pct": 0.11316955371898363,
+      "final_capital": 10011.316955371898,
+      "avg_trade_pnl": 1.2574394857664022,
+      "by_asset": {
+        "ETH": {
+          "trades": 8,
+          "pnl": 10.2644
+        },
+        "BTC": {
+          "trades": 1,
+          "pnl": 1.0525
+        }
+      },
+      "by_route": {
+        "binance->bybit": {
+          "trades": 5,
+          "pnl": 6.3442
+        },
+        "binance->okx": {
+          "trades": 1,
+          "pnl": 1.0525
+        },
+        "okx->binance": {
+          "trades": 1,
+          "pnl": 1.3819
+        },
+        "bybit->binance": {
+          "trades": 2,
+          "pnl": 2.5384
+        }
+      },
+      "scenario": "Комиссия 0.01%, задержка 250мс",
+      "fee_per_leg": 0.0001,
+      "latency_ms": 250,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531802,
+      "executable_candidates": 1317910,
+      "trades_executed": 9,
+      "total_pnl_usdt": 11.31695537189762,
+      "total_return_pct": 0.11316955371898363,
+      "final_capital": 10011.316955371898,
+      "avg_trade_pnl": 1.2574394857664022,
+      "by_asset": {
+        "ETH": {
+          "trades": 8,
+          "pnl": 10.2644
+        },
+        "BTC": {
+          "trades": 1,
+          "pnl": 1.0525
+        }
+      },
+      "by_route": {
+        "binance->bybit": {
+          "trades": 5,
+          "pnl": 6.3442
+        },
+        "binance->okx": {
+          "trades": 1,
+          "pnl": 1.0525
+        },
+        "okx->binance": {
+          "trades": 1,
+          "pnl": 1.3819
+        },
+        "bybit->binance": {
+          "trades": 2,
+          "pnl": 2.5384
+        }
+      },
+      "scenario": "Комиссия 0.01%, задержка 300мс",
+      "fee_per_leg": 0.0001,
+      "latency_ms": 300,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531798,
+      "executable_candidates": 1303978,
+      "trades_executed": 9,
+      "total_pnl_usdt": 13.946080061569546,
+      "total_return_pct": 0.13946080061568722,
+      "final_capital": 10013.946080061569,
+      "avg_trade_pnl": 1.5495644512855051,
+      "by_asset": {
+        "ETH": {
+          "trades": 8,
+          "pnl": 12.8599
+        },
+        "BTC": {
+          "trades": 1,
+          "pnl": 1.0862
+        }
+      },
+      "by_route": {
+        "binance->bybit": {
+          "trades": 5,
+          "pnl": 6.3912
+        },
+        "okx->binance": {
+          "trades": 3,
+          "pnl": 6.5253
+        },
+        "bybit->binance": {
+          "trades": 1,
+          "pnl": 1.0296
+        }
+      },
+      "scenario": "Комиссия 0.01%, задержка 500мс",
+      "fee_per_leg": 0.0001,
+      "latency_ms": 500,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 854089,
+      "raw_cross_candidates": 1531808,
+      "executable_candidates": 1531808,
+      "trades_executed": 96,
+      "total_pnl_usdt": 126.29664012056696,
+      "total_return_pct": 1.2629664012056674,
+      "final_capital": 10126.296640120567,
+      "avg_trade_pnl": 1.3155900012559059,
+      "by_asset": {
+        "ETH": {
+          "trades": 60,
+          "pnl": 81.2681
+        },
+        "BTC": {
+          "trades": 36,
+          "pnl": 45.0285
+        }
+      },
+      "by_route": {
+        "binance->okx": {
+          "trades": 32,
+          "pnl": 41.9868
+        },
+        "binance->bybit": {
+          "trades": 37,
+          "pnl": 49.324
+        },
+        "okx->binance": {
+          "trades": 15,
+          "pnl": 20.888
+        },
+        "bybit->binance": {
+          "trades": 9,
+          "pnl": 10.858
+        },
+        "okx->bybit": {
+          "trades": 2,
+          "pnl": 2.126
+        },
+        "bybit->okx": {
+          "trades": 1,
+          "pnl": 1.1138
+        }
+      },
+      "scenario": "Без комиссий, БЕЗ задержки (потолок)",
+      "fee_per_leg": 0.0,
+      "latency_ms": 0,
+      "max_quote_age_ms": 250
+    }
+  ]
+}
