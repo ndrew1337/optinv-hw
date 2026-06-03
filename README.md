@@ -46,9 +46,10 @@ depth 5, max quote age 250 ms, pre-funded inventory по 5 000 USDT-equivalent
 3. **L2/Tardis direct** — реальные стаканы BTC/ETH, buy по ask и sell по bid на
    разных биржах, исполнение в `t + latency_ms`, проход по глубине стакана.
    Комиссия spot считается как buy fee из купленного asset и sell fee из quote proceeds.
-4. **L2/Tardis direct + triangles** — direct-режим плюс same-exchange
-   треугольники длины 3 по видимому стакану в момент `t`. Циклы могут стартовать
-   из любой валюты, если под нее есть pre-funded inventory.
+4. **L2/Tardis direct + triangles** — единая стратегия: в момент `t` direct
+   cross-exchange кандидаты и same-exchange треугольники длины 3 конкурируют за
+   общий pre-funded inventory; резервируется лучший сигнал по expected PnL.
+   Triangle-циклы могут стартовать из любой валюты, если под нее есть inventory.
 
 ## Структура
 

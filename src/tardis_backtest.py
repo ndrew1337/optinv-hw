@@ -138,6 +138,61 @@ class L2TriangularResult:
         }
 
 
+@dataclass
+class L2CombinedResult:
+    direct_trades: List[L2Trade] = field(default_factory=list)
+    triangular_trades: List[L2TriangularTrade] = field(default_factory=list)
+    equity_curve: pd.Series = field(default_factory=pd.Series)
+    grid_points: int = 0
+    raw_crosses: int = 0
+    raw_cycles: int = 0
+    executable_candidates: int = 0
+    inventory_skips: int = 0
+    start_capital_usdt: float = 10_000.0
+
+    def summary(self) -> Dict:
+        direct_pnl = sum(t.pnl for t in self.direct_trades)
+        triangular_pnl = sum(t.pnl for t in self.triangular_trades)
+        pnl = direct_pnl + triangular_pnl
+        cap0 = self.start_capital_usdt
+        cap1 = cap0 + pnl
+        return {
+            "grid_points": self.grid_points,
+            "raw_cross_candidates": self.raw_crosses,
+            "raw_cycles": self.raw_cycles,
+            "executable_candidates": self.executable_candidates,
+            "inventory_skips": self.inventory_skips,
+            "trades_executed": len(self.direct_trades) + len(self.triangular_trades),
+            "direct_trades_executed": len(self.direct_trades),
+            "triangular_trades_executed": len(self.triangular_trades),
+            "total_pnl_usdt": float(pnl),
+            "direct_pnl_usdt": float(direct_pnl),
+            "triangular_pnl_usdt": float(triangular_pnl),
+            "total_return_pct": float((cap1 / cap0 - 1) * 100) if cap0 else 0.0,
+            "final_capital": float(cap1),
+            "avg_trade_pnl": (
+                float(pnl / (len(self.direct_trades) + len(self.triangular_trades)))
+                if self.direct_trades or self.triangular_trades
+                else 0.0
+            ),
+            "by_type": {
+                "direct": {"trades": len(self.direct_trades), "pnl": round(direct_pnl, 4)},
+                "triangle": {
+                    "trades": len(self.triangular_trades),
+                    "pnl": round(triangular_pnl, 4),
+                },
+            },
+            "by_route": _pnl_by_key(
+                self.direct_trades,
+                lambda t: f"{t.buy_ex}->{t.sell_ex}",
+            ),
+            "by_cycle": _tri_pnl_by_key(
+                self.triangular_trades,
+                lambda t: "->".join(t.cycle),
+            ),
+        }
+
+
 def _pnl_by_key(trades: List[L2Trade], key) -> Dict[str, Dict]:
     out: Dict[str, Dict] = {}
     for t in trades:
@@ -320,6 +375,24 @@ class _PendingTriangularTrade:
     signal_expected_pnl: float
 
 
+@dataclass(frozen=True)
+class _CombinedSignal:
+    kind: str
+    exec_ts: int
+    expected_pnl: float
+    edge_bps: float
+    asset: str | None = None
+    buy_ex: str | None = None
+    sell_ex: str | None = None
+    reserved_quote: float = 0.0
+    reserved_asset: float = 0.0
+    exchange: str | None = None
+    cycle: List[str] | None = None
+    reserved_currency: str | None = None
+    reserved_amount: float = 0.0
+    start_value_usdt: float = 0.0
+
+
 def _initial_mid(aligned: Dict[str, dict], tss: List[int], venue: str, max_age_ms: int) -> float:
     for t in tss:
         row = aligned[venue].get(t)
@@ -459,6 +532,90 @@ def _release_pending_reservation(
 ) -> None:
     quote_balances[pending.buy_ex] += pending.reserved_quote
     asset_balances[(pending.sell_ex, pending.asset)] += pending.reserved_asset
+
+
+def _release_direct_currency_reservation(
+    pending: _PendingTrade,
+    currency_balances: Dict[Tuple[str, str], float],
+) -> None:
+    currency_balances[(pending.buy_ex, "USDT")] += pending.reserved_quote
+    currency_balances[(pending.sell_ex, pending.asset)] += pending.reserved_asset
+
+
+def _execute_pending_direct_currency(
+    pending: _PendingTrade,
+    view: _AssetView,
+    config: L2Config,
+    currency_balances: Dict[Tuple[str, str], float],
+) -> L2Trade | None:
+    buy_row = view.aligned[pending.buy_ex].get(pending.exec_ts)
+    sell_row = view.aligned[pending.sell_ex].get(pending.exec_ts)
+    if buy_row is None or sell_row is None:
+        return None
+    if not _is_fresh(buy_row, pending.exec_ts, config.max_quote_age_ms):
+        return None
+    if not _is_fresh(sell_row, pending.exec_ts, config.max_quote_age_ms):
+        return None
+
+    exec_ask = buy_row.get("asks[0].price")
+    if exec_ask is None or not np.isfinite(exec_ask) or exec_ask <= 0:
+        return None
+
+    fee_factor = 1.0 - config.fee
+    if fee_factor <= 0:
+        return None
+
+    depth = config.depth
+    quote_cap = pending.reserved_quote
+    sell_asset_cap = pending.reserved_asset
+    target_gross_qty = quote_cap / exec_ask
+    gross_buy_size = min(
+        target_gross_qty,
+        _depth_sum(buy_row, "asks", depth),
+        _depth_sum(sell_row, "bids", depth) / fee_factor,
+        sell_asset_cap / fee_factor,
+    )
+    if gross_buy_size <= 0:
+        return None
+
+    f_buy, _ = _walk_buy(buy_row, gross_buy_size, depth)
+    size = f_buy * fee_factor
+    f_sell, _ = _walk_sell(sell_row, size, depth)
+    size = min(size, f_sell, sell_asset_cap)
+    if size <= 0:
+        return None
+
+    gross_buy_size = size / fee_factor
+    _, buy_cost = _walk_buy(buy_row, gross_buy_size, depth)
+    _, sell_proceeds = _walk_sell(sell_row, size, depth)
+    sell_proceeds *= fee_factor
+    pnl = sell_proceeds - buy_cost
+
+    if config.enforce_inventory:
+        currency_balances[(pending.buy_ex, "USDT")] += max(
+            0.0,
+            pending.reserved_quote - buy_cost,
+        )
+        currency_balances[(pending.buy_ex, pending.asset)] += size
+        currency_balances[(pending.sell_ex, pending.asset)] += max(
+            0.0,
+            pending.reserved_asset - size,
+        )
+        currency_balances[(pending.sell_ex, "USDT")] += sell_proceeds
+
+    return L2Trade(
+        ts=pending.ts,
+        exec_ts=pending.exec_ts,
+        asset=pending.asset,
+        buy_ex=pending.buy_ex,
+        sell_ex=pending.sell_ex,
+        size=size,
+        buy_cost=buy_cost,
+        sell_proceeds=sell_proceeds,
+        pnl=pnl,
+        signal_edge_bps=pending.signal_edge_bps,
+        signal_expected_pnl=pending.signal_expected_pnl,
+    )
 
 
 def _walk_buy_by_quote(row: dict, quote_amount: float, depth: int) -> Tuple[float, float]:
@@ -604,6 +761,63 @@ def _initial_currency_value_usdt(
         if value is not None and value > 0:
             return value
     return None
+
+
+def _initial_combined_balances(
+    asset_views: Dict[str, _AssetView],
+    exchange_views: Dict[str, _ExchangePairView],
+    pair_defs: Dict[str, Tuple[str, str]],
+    config: L2Config,
+) -> tuple[Dict[Tuple[str, str], float], float]:
+    venues = sorted(
+        {venue for view in asset_views.values() for venue in view.venues}
+        | set(exchange_views)
+    )
+    currencies = sorted(
+        {"USDT"}
+        | set(asset_views)
+        | {currency for pair in pair_defs.values() for currency in pair}
+    )
+    balances = {(venue, currency): 0.0 for venue in venues for currency in currencies}
+    if not venues or not currencies:
+        return balances, 0.0
+
+    if config.inventory_per_currency_usdt is not None:
+        per_currency = config.inventory_per_currency_usdt
+        for venue in venues:
+            for currency in currencies:
+                if currency == "USDT":
+                    balances[(venue, currency)] = per_currency
+                    continue
+                value = None
+                view = exchange_views.get(venue)
+                if view is not None:
+                    value = _initial_currency_value_usdt(
+                        view,
+                        currency,
+                        pair_defs,
+                        config.max_quote_age_ms,
+                    )
+                if value is None:
+                    asset_view = asset_views.get(currency)
+                    if asset_view is not None and venue in asset_view.venues:
+                        value = _initial_mid(
+                            asset_view.aligned,
+                            asset_view.tss,
+                            venue,
+                            config.max_quote_age_ms,
+                        )
+                balances[(venue, currency)] = (
+                    per_currency / value
+                    if value is not None and value > 0
+                    else 0.0
+                )
+        return balances, per_currency * len(venues) * len(currencies)
+
+    quote_per_venue = config.start_capital_usdt / len(venues)
+    for venue in venues:
+        balances[(venue, "USDT")] = quote_per_venue
+    return balances, config.start_capital_usdt
 
 
 def _execute_triangular_cycle(
@@ -1035,6 +1249,334 @@ def run_l2_triangular_backtest(
         trades=sorted(trades, key=lambda x: (x.exec_ts, x.ts)),
         equity_curve=equity,
         grid_points=len(all_ts),
+        raw_cycles=raw_cycles,
+        executable_candidates=executable_candidates,
+        inventory_skips=inventory_skips,
+        start_capital_usdt=start_capital,
+    )
+
+
+def run_l2_combined_backtest(
+    panels: Dict[Tuple[str, str], pd.DataFrame],
+    pair_panels: Dict[Tuple[str, str], pd.DataFrame],
+    config: L2Config,
+) -> L2CombinedResult:
+    """Unified direct + same-exchange triangle L2 strategy.
+
+    At each signal timestamp, direct cross-exchange candidates and length-3
+    same-exchange triangle candidates compete for one shared pre-funded
+    (exchange, currency) inventory. The best expected-PnL signal is reserved
+    and later executed on the latency-shifted book.
+    """
+    assets = sorted({a for (_, a) in panels})
+    asset_views: Dict[str, _AssetView] = {}
+    for asset in assets:
+        venues, tss, aligned = _align_asset(panels, asset)
+        if len(venues) >= 2 and tss:
+            asset_views[asset] = _AssetView(
+                venues=venues,
+                tss=tss,
+                tss_set=set(tss),
+                aligned=aligned,
+            )
+
+    pair_defs = _pair_defs_from_panels(pair_panels)
+    exchange_views: Dict[str, _ExchangePairView] = {}
+    for exchange in sorted({ex for ex, _ in pair_panels}):
+        view = _align_exchange_pairs(pair_panels, exchange)
+        if view is not None:
+            exchange_views[exchange] = view
+
+    all_frames = list(panels.values()) + list(pair_panels.values())
+    if not all_frames:
+        return L2CombinedResult(start_capital_usdt=config.start_capital_usdt)
+    all_ts = sorted(set().union(*[set(df["ts"]) for df in all_frames]))
+
+    currency_balances, start_capital = _initial_combined_balances(
+        asset_views,
+        exchange_views,
+        pair_defs,
+        config,
+    )
+    pending: list[tuple[int, int, str, _PendingTrade | _PendingTriangularTrade]] = []
+    direct_trades: List[L2Trade] = []
+    triangular_trades: List[L2TriangularTrade] = []
+    pnl_by_exec_ts: Dict[int, float] = {}
+    raw_crosses = 0
+    raw_cycles = 0
+    executable_candidates = 0
+    inventory_skips = 0
+    seq = 0
+
+    def handle_pending(kind: str, pending_trade: _PendingTrade | _PendingTriangularTrade) -> None:
+        nonlocal executable_candidates
+        if kind == "direct":
+            assert isinstance(pending_trade, _PendingTrade)
+            view = asset_views[pending_trade.asset]
+            trade = _execute_pending_direct_currency(
+                pending_trade,
+                view,
+                config,
+                currency_balances,
+            )
+            if trade is None:
+                if config.enforce_inventory:
+                    _release_direct_currency_reservation(pending_trade, currency_balances)
+                return
+            executable_candidates += 1
+            direct_trades.append(trade)
+            pnl_by_exec_ts[trade.exec_ts] = pnl_by_exec_ts.get(trade.exec_ts, 0.0) + trade.pnl
+            return
+
+        assert isinstance(pending_trade, _PendingTriangularTrade)
+        view = exchange_views[pending_trade.exchange]
+        trade = _execute_pending_triangle(pending_trade, view, pair_defs, config)
+        if trade is None:
+            if config.enforce_inventory:
+                currency_balances[
+                    (pending_trade.exchange, pending_trade.reserved_currency)
+                ] += pending_trade.reserved_amount
+            return
+        executable_candidates += 1
+        triangular_trades.append(trade)
+        pnl_by_exec_ts[trade.exec_ts] = pnl_by_exec_ts.get(trade.exec_ts, 0.0) + trade.pnl
+        if config.enforce_inventory:
+            currency_balances[(trade.exchange, trade.start_currency)] += trade.end_amount
+
+    def maybe_update_best(best: _CombinedSignal | None, signal: _CombinedSignal) -> _CombinedSignal:
+        if best is None or signal.expected_pnl > best.expected_pnl:
+            return signal
+        return best
+
+    for t in all_ts:
+        while pending and pending[0][0] <= t:
+            _, _, kind, pending_trade = heappop(pending)
+            handle_pending(kind, pending_trade)
+
+        best_signal: _CombinedSignal | None = None
+
+        for asset, view in asset_views.items():
+            if t not in view.tss_set:
+                continue
+            n = bisect_left(view.tss, t)
+            te_idx = bisect_left(view.tss, t + config.latency_ms, lo=n)
+            if te_idx >= len(view.tss):
+                continue
+            te = view.tss[te_idx]
+
+            best_ask_ex, best_ask = None, float("inf")
+            best_bid_ex, best_bid = None, float("-inf")
+            for ex in view.venues:
+                row = view.aligned[ex].get(t)
+                if row is None or not _is_fresh(row, t, config.max_quote_age_ms):
+                    continue
+                ask = row.get("asks[0].price")
+                bid = row.get("bids[0].price")
+                if ask is not None and np.isfinite(ask) and ask < best_ask:
+                    best_ask, best_ask_ex = ask, ex
+                if bid is not None and np.isfinite(bid) and bid > best_bid:
+                    best_bid, best_bid_ex = bid, ex
+
+            if best_ask_ex is None or best_bid_ex is None or best_ask_ex == best_bid_ex:
+                continue
+            if best_bid <= best_ask:
+                continue
+            raw_crosses += 1
+
+            fee_factor = 1.0 - config.fee
+            if fee_factor <= 0:
+                continue
+            if config.enforce_inventory:
+                if config.stake_fraction is None:
+                    reserved_quote = _fixed_or_fractional_notional(config)
+                else:
+                    stake_fraction = _stake_fraction(config)
+                    quote_capacity = (
+                        currency_balances.get((best_ask_ex, "USDT"), 0.0)
+                        * stake_fraction
+                    )
+                    asset_capacity = (
+                        currency_balances.get((best_bid_ex, asset), 0.0)
+                        * stake_fraction
+                        * best_ask
+                        / fee_factor
+                    )
+                    reserved_quote = min(quote_capacity, asset_capacity)
+            else:
+                reserved_quote = _fixed_or_fractional_notional(config)
+            _, reserved_quote = _apply_notional_cap(1.0, reserved_quote, config)
+            if reserved_quote <= 0:
+                continue
+
+            signal_gross_edge = (best_bid / best_ask) * fee_factor**2 - 1.0
+            signal_edge_bps = signal_gross_edge * 10_000
+            signal_expected_pnl = reserved_quote * signal_gross_edge
+            if (
+                signal_expected_pnl < _min_signal_profit_usdt(config, reserved_quote)
+                or signal_edge_bps < _min_signal_edge_bps(config)
+            ):
+                continue
+
+            reserved_asset = (reserved_quote / best_ask) * fee_factor
+            signal = _CombinedSignal(
+                kind="direct",
+                exec_ts=te,
+                expected_pnl=signal_expected_pnl,
+                edge_bps=signal_edge_bps,
+                asset=asset,
+                buy_ex=best_ask_ex,
+                sell_ex=best_bid_ex,
+                reserved_quote=reserved_quote,
+                reserved_asset=reserved_asset,
+            )
+            best_signal = maybe_update_best(best_signal, signal)
+
+        for exchange, view in exchange_views.items():
+            if t not in view.tss_set:
+                continue
+            n = bisect_left(view.tss, t)
+            te_idx = bisect_left(view.tss, t + config.latency_ms, lo=n)
+            if te_idx >= len(view.tss):
+                continue
+            te = view.tss[te_idx]
+
+            rows_by_pair = _rows_at(view, t)
+            graph, actions = _build_l2_exchange_graph(rows_by_pair, pair_defs, config, t)
+            seen_cycles: set[tuple[str, ...]] = set()
+            for signal_cycle in enumerate_triangles(graph):
+                if signal_cycle.length != 3:
+                    continue
+                cycle_key = _canonical_cycle_key(signal_cycle)
+                if cycle_key in seen_cycles:
+                    continue
+                seen_cycles.add(cycle_key)
+                raw_cycles += 1
+                for cycle_start in signal_cycle.currencies[:-1]:
+                    cycle_path = _rotate_cycle_to(signal_cycle, cycle_start)
+                    value_usdt = _currency_value_usdt(cycle_start, rows_by_pair, pair_defs)
+                    if value_usdt is None or value_usdt <= 0:
+                        continue
+                    balance = currency_balances.get((exchange, cycle_start), 0.0)
+                    stake_amount = balance * _stake_fraction(config)
+                    stake_value_usdt = stake_amount * value_usdt
+                    stake_amount, stake_value_usdt = _apply_notional_cap(
+                        stake_amount,
+                        stake_value_usdt,
+                        config,
+                    )
+                    if stake_amount <= 0 or stake_value_usdt <= 0:
+                        continue
+                    expected_end = _execute_triangular_cycle(
+                        cycle_path,
+                        actions,
+                        rows_by_pair,
+                        stake_amount,
+                        config,
+                    )
+                    if expected_end is None:
+                        continue
+                    signal_gross_edge = expected_end / stake_amount - 1.0
+                    signal_edge_bps = signal_gross_edge * 10_000
+                    signal_expected_pnl = stake_value_usdt * signal_gross_edge
+                    if (
+                        signal_expected_pnl < _min_signal_profit_usdt(config, stake_value_usdt)
+                        or signal_edge_bps < _min_signal_edge_bps(config)
+                    ):
+                        continue
+                    signal = _CombinedSignal(
+                        kind="triangle",
+                        exec_ts=te,
+                        expected_pnl=signal_expected_pnl,
+                        edge_bps=signal_edge_bps,
+                        exchange=exchange,
+                        cycle=cycle_path,
+                        reserved_currency=cycle_start,
+                        reserved_amount=stake_amount,
+                        start_value_usdt=stake_value_usdt,
+                    )
+                    best_signal = maybe_update_best(best_signal, signal)
+
+        if best_signal is None:
+            continue
+
+        if best_signal.kind == "direct":
+            if (
+                best_signal.asset is None
+                or best_signal.buy_ex is None
+                or best_signal.sell_ex is None
+            ):
+                continue
+            if config.enforce_inventory:
+                quote_key = (best_signal.buy_ex, "USDT")
+                asset_key = (best_signal.sell_ex, best_signal.asset)
+                if currency_balances.get(quote_key, 0.0) < best_signal.reserved_quote:
+                    inventory_skips += 1
+                    continue
+                if currency_balances.get(asset_key, 0.0) < best_signal.reserved_asset:
+                    inventory_skips += 1
+                    continue
+                currency_balances[quote_key] -= best_signal.reserved_quote
+                currency_balances[asset_key] -= best_signal.reserved_asset
+            pending_trade = _PendingTrade(
+                seq=seq,
+                ts=t,
+                exec_ts=best_signal.exec_ts,
+                asset=best_signal.asset,
+                buy_ex=best_signal.buy_ex,
+                sell_ex=best_signal.sell_ex,
+                reserved_quote=best_signal.reserved_quote,
+                reserved_asset=best_signal.reserved_asset,
+                signal_edge_bps=best_signal.edge_bps,
+                signal_expected_pnl=best_signal.expected_pnl,
+            )
+            heappush(pending, (best_signal.exec_ts, seq, "direct", pending_trade))
+            seq += 1
+            continue
+
+        if (
+            best_signal.exchange is None
+            or best_signal.cycle is None
+            or best_signal.reserved_currency is None
+        ):
+            continue
+        if config.enforce_inventory:
+            balance_key = (best_signal.exchange, best_signal.reserved_currency)
+            if currency_balances.get(balance_key, 0.0) < best_signal.reserved_amount:
+                inventory_skips += 1
+                continue
+            currency_balances[balance_key] -= best_signal.reserved_amount
+        pending_trade = _PendingTriangularTrade(
+            seq=seq,
+            ts=t,
+            exec_ts=best_signal.exec_ts,
+            exchange=best_signal.exchange,
+            cycle=best_signal.cycle,
+            reserved_currency=best_signal.reserved_currency,
+            reserved_amount=best_signal.reserved_amount,
+            signal_start_value_usdt=best_signal.start_value_usdt,
+            signal_edge_bps=best_signal.edge_bps,
+            signal_expected_pnl=best_signal.expected_pnl,
+        )
+        heappush(pending, (best_signal.exec_ts, seq, "triangle", pending_trade))
+        seq += 1
+
+    while pending:
+        _, _, kind, pending_trade = heappop(pending)
+        handle_pending(kind, pending_trade)
+
+    pnl_at = pd.Series(0.0, index=all_ts)
+    for ts, pnl in pnl_by_exec_ts.items():
+        if ts in pnl_at.index:
+            pnl_at.loc[ts] += pnl
+    equity = start_capital + pnl_at.cumsum()
+    equity.index = pd.to_datetime(all_ts, unit="ms", utc=True)
+
+    return L2CombinedResult(
+        direct_trades=sorted(direct_trades, key=lambda x: (x.exec_ts, x.ts)),
+        triangular_trades=sorted(triangular_trades, key=lambda x: (x.exec_ts, x.ts)),
+        equity_curve=equity,
+        grid_points=len(all_ts),
+        raw_crosses=raw_crosses,
         raw_cycles=raw_cycles,
         executable_candidates=executable_candidates,
         inventory_skips=inventory_skips,

@@ -4,7 +4,12 @@ import pandas as pd
 import pytest
 
 import run_tardis
-from src.tardis_backtest import L2Config, run_l2_backtest, run_l2_triangular_backtest
+from src.tardis_backtest import (
+    L2Config,
+    run_l2_backtest,
+    run_l2_combined_backtest,
+    run_l2_triangular_backtest,
+)
 from src.tardis_data import load_grid, normalize_pair, tardis_pair_symbol
 
 
@@ -441,6 +446,41 @@ def test_l2_triangular_backtest_does_not_lookahead_to_execution_book():
     assert result.trades == []
     assert result.raw_cycles == 0
     assert result.executable_candidates == 0
+
+
+def test_l2_combined_backtest_selects_best_direct_or_triangle_signal():
+    panels = {
+        ("cheap", "BTC"): _book_df("cheap", "BTC", [(0, 100.0, 99.0)]),
+        ("rich", "BTC"): _book_df("rich", "BTC", [(0, 130.0, 120.0)]),
+    }
+    pair_panels = {
+        ("cheap", "BTCUSDT"): _pair_book_df("cheap", "BTC", "USDT", [(0, 100.0, 99.0)]),
+        ("cheap", "ETHBTC"): _pair_book_df("cheap", "ETH", "BTC", [(0, 0.5, 0.49)]),
+        ("cheap", "ETHUSDT"): _pair_book_df("cheap", "ETH", "USDT", [(0, 53.0, 52.0)]),
+    }
+
+    result = run_l2_combined_backtest(
+        panels,
+        pair_panels,
+        L2Config(
+            fee=0.0,
+            stake_fraction=0.2,
+            min_profit_pct=0.05,
+            latency_ms=0,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=1000,
+            inventory_per_currency_usdt=5_000.0,
+            enforce_inventory=True,
+        ),
+    )
+
+    assert result.raw_crosses == 1
+    assert result.raw_cycles == 1
+    assert len(result.direct_trades) == 1
+    assert result.triangular_trades == []
+    assert result.summary()["trades_executed"] == 1
+    assert result.summary()["by_type"]["direct"]["trades"] == 1
 
 
 def test_load_grid_normalizes_legacy_sec_cache(tmp_path: Path):

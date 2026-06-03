@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.tardis_backtest import L2Config, run_l2_backtest, run_l2_triangular_backtest
+from src.tardis_backtest import L2Config, run_l2_backtest, run_l2_combined_backtest
 from src.tardis_data import load_l2_pair_panels, load_l2_panels, normalize_pair
 
 
@@ -141,7 +141,7 @@ def main() -> None:
     ap.add_argument("--exchanges", nargs="+", default=["binance", "bybit", "okx"])
     ap.add_argument("--mode", choices=["direct", "direct-plus-triangles"], default="direct",
                     help="direct = cross-exchange cycles length 2; direct-plus-triangles "
-                         "= direct plus same-exchange triangular cycles length 3")
+                         "= unified direct + same-exchange length-3 strategy with shared inventory")
     ap.add_argument("--output-tag",
                     help="Optional suffix for result filenames, useful for parallel runs")
     ap.add_argument("--triangle-pairs", nargs="+",
@@ -208,47 +208,152 @@ def main() -> None:
     date_tag = args.date.replace("-", "")
     output_tag = f"_{args.output_tag}" if args.output_tag else ""
 
-    summaries = []
     import matplotlib.pyplot as plt
 
+    if args.mode == "direct":
+        summaries = []
+        fig, ax = plt.subplots(figsize=(10, 4))
+        for key, title, fee_pct, cfg in scenarios:
+            print(f"\nRunning: {title}")
+            res = run_l2_backtest(panels, cfg)
+            s = res.summary()
+            s["scenario"] = title
+            s["fee_pct"] = fee_pct
+            s["fee_per_leg"] = cfg.fee
+            s["latency_ms"] = cfg.latency_ms
+            s["max_quote_age_ms"] = cfg.max_quote_age_ms
+            summaries.append(s)
+            print(f"  trades={s['trades_executed']}  pnl={s['total_pnl_usdt']:.2f} USDT  "
+                  f"return={s['total_return_pct']:.3f}%  raw_crosses={s['raw_cross_candidates']}  "
+                  f"exec_candidates={s['executable_candidates']}  "
+                  f"inventory_skips={s['inventory_skips']}")
+            print(f"  by_route={s['by_route']}")
+
+            res.equity_curve.to_csv(results / f"tardis_equity_{key}{output_tag}.csv", header=["equity"])
+            write_trades_csv(res.trades, results / f"tardis_trades_{key}{output_tag}.csv")
+            if not res.equity_curve.empty:
+                res.equity_curve.plot(ax=ax, lw=1.1, label=title)
+
+        ax.set_title(f"L2 cross-exchange arbitrage — Tardis {args.date} ({'/'.join(venues)})")
+        ax.set_ylabel("Capital (USDT)")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        dated_plot_path = results / f"tardis_equity_{date_tag}{output_tag}.png"
+        latest_plot_path = results / f"tardis_equity{output_tag}.png"
+        fig.savefig(dated_plot_path, dpi=120)
+        fig.savefig(latest_plot_path, dpi=120)
+        plt.close()
+
+        meta = {
+            "data_source": "Tardis.dev free first-of-month L2 sample (book_snapshot_25)",
+            "date": args.date,
+            "venues": venues,
+            "assets": assets,
+            "max_notional_usdt": args.notional,
+            "stake_pct": args.stake_pct,
+            "inventory_per_currency_usdt": args.inventory_per_currency_usdt,
+            "min_profit_usdt": args.min_profit_usdt,
+            "min_profit_pct": args.min_profit_pct,
+            "min_edge_bps": args.min_edge_bps,
+            "book_depth_levels": args.depth,
+            "grid_ms": args.grid_ms,
+            "max_quote_age_ms": args.max_quote_age_ms,
+            "fees_pct": args.fees_pct,
+            "latencies_ms": args.latencies_ms,
+            "model": "pre-funded inventory, slippage via order-book walking, "
+                     "latency-shifted execution (decide at t, fill on first grid point "
+                     "at/after t+Δ), spot buy fee deducted from base asset, spot sell fee "
+                     "deducted from quote proceeds, stale forward-filled books capped by "
+                     "max_quote_age_ms",
+            "scenarios": summaries,
+        }
+        dated_report_path = results / f"tardis_l2_report_{date_tag}{output_tag}.json"
+        latest_report_path = results / f"tardis_l2_report{output_tag}.json"
+        for path in (dated_report_path, latest_report_path):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+
+        print(f"\nSaved: {dated_report_path}, {dated_plot_path}")
+        print(f"Latest aliases: {latest_report_path}, {latest_plot_path}")
+        return
+
+    triangle_pairs = (
+        parse_pairs(args.triangle_pairs)
+        if args.triangle_pairs
+        else triangle_pairs_from_assets(args.assets)
+    )
+    print(
+        "\nLoading Tardis L2 triangle panels "
+        f"({args.date}, pairs={' '.join(f'{b}/{q}' for b, q in triangle_pairs)})..."
+    )
+    pair_panels = load_l2_pair_panels(
+        pairs=triangle_pairs,
+        exchanges=args.exchanges,
+        date=args.date,
+        raw_dir=raw_dir,
+        grid_dir=grid_dir,
+        depth=args.depth,
+        grid_ms=args.grid_ms,
+    )
+    if len(pair_panels) < 3:
+        raise SystemExit("Need at least three available pair panels for combined mode.")
+
+    pair_labels = [f"{base}/{quote}" for base, quote in triangle_pairs]
+    combined_summaries = []
     fig, ax = plt.subplots(figsize=(10, 4))
     for key, title, fee_pct, cfg in scenarios:
-        print(f"\nRunning: {title}")
-        res = run_l2_backtest(panels, cfg)
+        print(f"\nRunning combined direct+triangles: {title}")
+        res = run_l2_combined_backtest(panels, pair_panels, cfg)
         s = res.summary()
         s["scenario"] = title
         s["fee_pct"] = fee_pct
         s["fee_per_leg"] = cfg.fee
         s["latency_ms"] = cfg.latency_ms
         s["max_quote_age_ms"] = cfg.max_quote_age_ms
-        summaries.append(s)
-        print(f"  trades={s['trades_executed']}  pnl={s['total_pnl_usdt']:.2f} USDT  "
-              f"return={s['total_return_pct']:.3f}%  raw_crosses={s['raw_cross_candidates']}  "
+        combined_summaries.append(s)
+        print(f"  trades={s['trades_executed']}  direct={s['direct_trades_executed']}  "
+              f"triangles={s['triangular_trades_executed']}  "
+              f"pnl={s['total_pnl_usdt']:.2f} USDT  return={s['total_return_pct']:.3f}%  "
+              f"raw_crosses={s['raw_cross_candidates']}  raw_cycles={s['raw_cycles']}  "
               f"exec_candidates={s['executable_candidates']}  "
               f"inventory_skips={s['inventory_skips']}")
+        print(f"  by_type={s['by_type']}")
         print(f"  by_route={s['by_route']}")
+        print(f"  by_cycle={s['by_cycle']}")
 
-        res.equity_curve.to_csv(results / f"tardis_equity_{key}{output_tag}.csv", header=["equity"])
-        write_trades_csv(res.trades, results / f"tardis_trades_{key}{output_tag}.csv")
+        res.equity_curve.to_csv(
+            results / f"tardis_combined_equity_{key}{output_tag}.csv",
+            header=["equity"],
+        )
+        write_trades_csv(
+            res.direct_trades,
+            results / f"tardis_combined_direct_trades_{key}{output_tag}.csv",
+        )
+        write_triangular_trades_csv(
+            res.triangular_trades,
+            results / f"tardis_combined_triangle_trades_{key}{output_tag}.csv",
+        )
         if not res.equity_curve.empty:
             res.equity_curve.plot(ax=ax, lw=1.1, label=title)
 
-    ax.set_title(f"L2 cross-exchange arbitrage — Tardis {args.date} ({'/'.join(venues)})")
+    ax.set_title(f"L2 combined direct + triangles — Tardis {args.date}")
     ax.set_ylabel("Capital (USDT)")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    dated_plot_path = results / f"tardis_equity_{date_tag}{output_tag}.png"
-    latest_plot_path = results / f"tardis_equity{output_tag}.png"
+    dated_plot_path = results / f"tardis_combined_equity_{date_tag}{output_tag}.png"
+    latest_plot_path = results / f"tardis_combined_equity{output_tag}.png"
     fig.savefig(dated_plot_path, dpi=120)
     fig.savefig(latest_plot_path, dpi=120)
-    plt.close()
+    plt.close(fig)
 
     meta = {
         "data_source": "Tardis.dev free first-of-month L2 sample (book_snapshot_25)",
         "date": args.date,
-        "venues": venues,
+        "venues": args.exchanges,
         "assets": assets,
+        "pairs": pair_labels,
         "max_notional_usdt": args.notional,
         "stake_pct": args.stake_pct,
         "inventory_per_currency_usdt": args.inventory_per_currency_usdt,
@@ -260,114 +365,21 @@ def main() -> None:
         "max_quote_age_ms": args.max_quote_age_ms,
         "fees_pct": args.fees_pct,
         "latencies_ms": args.latencies_ms,
-        "model": "pre-funded inventory, slippage via order-book walking, "
-                 "latency-shifted execution (decide at t, fill on first grid point "
-                 "at/after t+Δ), spot buy fee deducted from base asset, spot sell fee "
-                 "deducted from quote proceeds, stale forward-filled books capped by "
-                 "max_quote_age_ms",
-        "scenarios": summaries,
+        "model": "unified pre-funded inventory strategy: at each signal timestamp, "
+                 "cross-exchange direct candidates and same-exchange length-3 "
+                 "triangular candidates compete for one shared (exchange, currency) "
+                 "inventory; the highest expected-PnL signal is reserved and executed "
+                 "on the first grid point at/after t+Δ",
+        "scenarios": combined_summaries,
     }
-    dated_report_path = results / f"tardis_l2_report_{date_tag}{output_tag}.json"
-    latest_report_path = results / f"tardis_l2_report{output_tag}.json"
+    dated_report_path = results / f"tardis_combined_report_{date_tag}{output_tag}.json"
+    latest_report_path = results / f"tardis_combined_report{output_tag}.json"
     for path in (dated_report_path, latest_report_path):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
 
-    if args.mode == "direct-plus-triangles":
-        triangle_pairs = (
-            parse_pairs(args.triangle_pairs)
-            if args.triangle_pairs
-            else triangle_pairs_from_assets(args.assets)
-        )
-        print(
-            "\nLoading Tardis L2 triangle panels "
-            f"({args.date}, pairs={' '.join(f'{b}/{q}' for b, q in triangle_pairs)})..."
-        )
-        pair_panels = load_l2_pair_panels(
-            pairs=triangle_pairs,
-            exchanges=args.exchanges,
-            date=args.date,
-            raw_dir=raw_dir,
-            grid_dir=grid_dir,
-            depth=args.depth,
-            grid_ms=args.grid_ms,
-        )
-        if len(pair_panels) < 3:
-            print("Skipping triangle mode: need at least three available pair panels.")
-        else:
-            triangle_summaries = []
-            tri_fig, tri_ax = plt.subplots(figsize=(10, 4))
-            for key, title, fee_pct, cfg in scenarios:
-                print(f"\nRunning triangles: {title}")
-                tri_res = run_l2_triangular_backtest(pair_panels, cfg)
-                s = tri_res.summary()
-                s["scenario"] = title
-                s["fee_pct"] = fee_pct
-                s["fee_per_leg"] = cfg.fee
-                s["latency_ms"] = cfg.latency_ms
-                s["max_quote_age_ms"] = cfg.max_quote_age_ms
-                triangle_summaries.append(s)
-                print(f"  trades={s['trades_executed']}  pnl={s['total_pnl_usdt']:.2f} USDT  "
-                      f"return={s['total_return_pct']:.3f}%  raw_cycles={s['raw_cycles']}  "
-                      f"exec_candidates={s['executable_candidates']}  "
-                      f"inventory_skips={s['inventory_skips']}")
-                print(f"  by_cycle={s['by_cycle']}")
-
-                tri_res.equity_curve.to_csv(
-                    results / f"tardis_triangles_equity_{key}{output_tag}.csv",
-                    header=["equity"],
-                )
-                write_triangular_trades_csv(
-                    tri_res.trades,
-                    results / f"tardis_triangles_trades_{key}{output_tag}.csv",
-                )
-                if not tri_res.equity_curve.empty:
-                    tri_res.equity_curve.plot(ax=tri_ax, lw=1.1, label=title)
-
-            pair_labels = [f"{base}/{quote}" for base, quote in triangle_pairs]
-            tri_ax.set_title(f"L2 same-exchange triangles — Tardis {args.date}")
-            tri_ax.set_ylabel("Capital (USDT)")
-            tri_ax.legend(fontsize=8)
-            tri_ax.grid(True, alpha=0.3)
-            tri_fig.tight_layout()
-            dated_tri_plot_path = results / f"tardis_triangles_equity_{date_tag}{output_tag}.png"
-            latest_tri_plot_path = results / f"tardis_triangles_equity{output_tag}.png"
-            tri_fig.savefig(dated_tri_plot_path, dpi=120)
-            tri_fig.savefig(latest_tri_plot_path, dpi=120)
-            plt.close(tri_fig)
-
-            triangle_meta = {
-                "data_source": "Tardis.dev free first-of-month L2 sample (book_snapshot_25)",
-                "date": args.date,
-                "venues": args.exchanges,
-                "pairs": pair_labels,
-                "max_notional_usdt": args.notional,
-                "stake_pct": args.stake_pct,
-                "inventory_per_currency_usdt": args.inventory_per_currency_usdt,
-                "min_profit_usdt": args.min_profit_usdt,
-                "min_profit_pct": args.min_profit_pct,
-                "min_edge_bps": args.min_edge_bps,
-                "book_depth_levels": args.depth,
-                "grid_ms": args.grid_ms,
-                "max_quote_age_ms": args.max_quote_age_ms,
-                "fees_pct": args.fees_pct,
-                "latencies_ms": args.latencies_ms,
-                "model": "same-exchange triangular cycles length 3, signal graph built "
-                         "from visible books at t, execution on first grid point at/after "
-                         "t+Δ, each leg walked through the real L2 book, spot buy fee "
-                         "deducted from received base and spot sell fee deducted from "
-                         "quote proceeds",
-                "scenarios": triangle_summaries,
-            }
-            dated_tri_report_path = results / f"tardis_triangles_report_{date_tag}{output_tag}.json"
-            latest_tri_report_path = results / f"tardis_triangles_report{output_tag}.json"
-            for path in (dated_tri_report_path, latest_tri_report_path):
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(triangle_meta, f, indent=2, ensure_ascii=False)
-            print(f"Saved triangles: {dated_tri_report_path}, {dated_tri_plot_path}")
-
-    print(f"\nSaved: {dated_report_path}, {dated_plot_path}")
-    print(f"Latest aliases: {latest_report_path}, {latest_plot_path}")
+    print(f"\nSaved combined: {dated_report_path}, {dated_plot_path}")
+    print(f"Latest combined aliases: {latest_report_path}, {latest_plot_path}")
 
 
 if __name__ == "__main__":
