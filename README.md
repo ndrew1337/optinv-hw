@@ -17,7 +17,7 @@ python3 -m pytest tests/ -v
 python3 run_report.py --days 14    # все 4 сценария + HTML-отчёт
 python3 run_backtest.py --days 14  # только одна биржа
 python3 run_analysis.py
-python3 run_tardis.py --date 2026-05-01   # реальный L2 order book (Tardis.dev free)
+python3 run_tardis.py --date 2026-05-01 --assets BTC ETH   # реальный L2 order book
 ```
 
 ## Проверка на реальном стакане (L2)
@@ -27,9 +27,11 @@ python3 run_tardis.py --date 2026-05-01   # реальный L2 order book (Tard
 без ключа), BTC/ETH на Binance/Bybit/OKX. Проскальзывание — проходом по стакану,
 учитываются latency, stale quotes и pre-funded inventory.
 
-Текущий сохранённый L2-прогон: `2026-05-01`, notional 2000 USDT, grid 100 ms,
-depth 5, max quote age 250 ms. При retail taker `0.10%` сделок нет; при low-fee
-`0.01%` и latency `300ms` получается 9 сделок, +11.32 USDT за день. См.
+Текущий CLI по умолчанию запускает BTC/ETH на Binance/Bybit/OKX, grid 100 ms,
+depth 5, max quote age 250 ms, pre-funded inventory по 5 000 USDT-equivalent
+на каждую валюту на каждой бирже и размер сделки до 20% доступного inventory.
+Параметр `--notional` теперь опциональный cap, а не обязательный фиксированный
+размер сделки. См.
 `results/tardis_l2_report.json` и `results/CONCLUSIONS.md`.
 
 **Главный отчёт:** `results/REPORT.html` (одна биржа / межбиржевой × с комиссиями / без).
@@ -41,9 +43,12 @@ depth 5, max quote age 250 ms. При retail taker `0.10%` сделок нет; 
 2. **Свечи, несколько бирж** — Binance/Bybit/OKX, прямой cross-exchange маршрут
    `USDT@buy_ex -> asset@buy_ex` и `asset@sell_ex -> USDT@sell_ex`.
    Тоже без same-bar lookahead: сигнал `t`, исполнение `t+1`.
-3. **L2/Tardis** — реальные стаканы BTC/ETH, buy по ask и sell по bid на разных
-   биржах, исполнение в `t + latency_ms`, проход по глубине стакана.
+3. **L2/Tardis direct** — реальные стаканы BTC/ETH, buy по ask и sell по bid на
+   разных биржах, исполнение в `t + latency_ms`, проход по глубине стакана.
    Комиссия spot считается как buy fee из купленного asset и sell fee из quote proceeds.
+4. **L2/Tardis direct + triangles** — direct-режим плюс same-exchange
+   треугольники длины 3 по видимому стакану в момент `t`. Циклы могут стартовать
+   из любой валюты, если под нее есть pre-funded inventory.
 
 ## Структура
 

@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.tardis_backtest import L2Config, run_l2_backtest
-from src.tardis_data import load_l2_panels
+from src.tardis_backtest import L2Config, run_l2_backtest, run_l2_triangular_backtest
+from src.tardis_data import load_l2_pair_panels, load_l2_panels, normalize_pair
 
 
 DEFAULT_FEES_PCT = [0.0, 0.01, 0.1]
@@ -27,6 +27,12 @@ DEFAULT_LATENCIES_MS = [0, 100, 300, 500]
 TRADE_COLUMNS = [
     "signal_ts_ms", "exec_ts_ms", "asset", "buy_ex", "sell_ex", "size",
     "buy_cost", "sell_proceeds", "pnl", "signal_edge_bps", "signal_expected_pnl",
+]
+
+TRIANGULAR_TRADE_COLUMNS = [
+    "signal_ts_ms", "exec_ts_ms", "exchange", "cycle", "start_currency",
+    "start_amount", "end_amount", "start_value_usdt", "end_value_usdt",
+    "pnl", "signal_edge_bps", "signal_expected_pnl",
 ]
 
 
@@ -39,6 +45,20 @@ def write_trades_csv(trades, path: Path) -> None:
         "signal_edge_bps": t.signal_edge_bps,
         "signal_expected_pnl": t.signal_expected_pnl,
     } for t in trades], columns=TRADE_COLUMNS).to_csv(path, index=False)
+
+
+def write_triangular_trades_csv(trades, path: Path) -> None:
+    pd.DataFrame([{
+        "signal_ts_ms": t.ts, "exec_ts_ms": t.exec_ts,
+        "exchange": t.exchange, "cycle": "->".join(t.cycle),
+        "start_currency": t.start_currency,
+        "start_amount": t.start_amount, "end_amount": t.end_amount,
+        "start_value_usdt": t.start_value_usdt,
+        "end_value_usdt": t.end_value_usdt,
+        "pnl": t.pnl,
+        "signal_edge_bps": t.signal_edge_bps,
+        "signal_expected_pnl": t.signal_expected_pnl,
+    } for t in trades], columns=TRIANGULAR_TRADE_COLUMNS).to_csv(path, index=False)
 
 
 def _dedupe_preserve_order(values):
@@ -87,14 +107,39 @@ def build_scenarios(date: str, fees_pct, latencies_ms, cfg_factory):
     return scenarios
 
 
+def triangle_pairs_from_assets(assets):
+    ordered_assets = _dedupe_preserve_order([a.upper() for a in assets])
+    pairs = [(asset, "USDT") for asset in ordered_assets]
+    for quote_index, quote in enumerate(ordered_assets):
+        for base in ordered_assets[quote_index + 1:]:
+            pairs.append((base, quote))
+    return pairs
+
+
+def parse_pairs(pair_args):
+    return _dedupe_preserve_order([normalize_pair(pair) for pair in pair_args])
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default="2026-05-01", help="First day of a month (free tier)")
     ap.add_argument("--assets", nargs="+", default=["BTC", "ETH"])
     ap.add_argument("--exchanges", nargs="+", default=["binance", "bybit", "okx"])
-    ap.add_argument("--notional", type=float, default=2_000.0)
-    ap.add_argument("--min-profit-usdt", type=float, default=0.01,
-                    help="Minimum expected PnL at signal time required to send a trade")
+    ap.add_argument("--mode", choices=["direct", "direct-plus-triangles"], default="direct",
+                    help="direct = cross-exchange cycles length 2; direct-plus-triangles "
+                         "= direct plus same-exchange triangular cycles length 3")
+    ap.add_argument("--output-tag",
+                    help="Optional suffix for result filenames, useful for parallel runs")
+    ap.add_argument("--triangle-pairs", nargs="+",
+                    help="Optional pair override for triangle mode, e.g. BTC/USDT ETH/USDT ETH/BTC")
+    ap.add_argument("--notional", type=float,
+                    help="Optional USDT cap per trade; omitted means size only by stake percent")
+    ap.add_argument("--stake-pct", type=float, default=20.0,
+                    help="Maximum share of available start inventory to use per opportunity")
+    ap.add_argument("--min-profit-usdt", type=float, default=0.0,
+                    help="Optional absolute expected-PnL floor at signal time")
+    ap.add_argument("--min-profit-pct", type=float, default=0.5,
+                    help="Minimum expected PnL at signal time as percent of notional")
     ap.add_argument("--min-edge-bps", type=float, default=0.0,
                     help="Minimum net edge after fees, in basis points")
     ap.add_argument("--depth", type=int, default=5)
@@ -106,6 +151,8 @@ def main() -> None:
                     help="Spot taker fee per leg in percent, e.g. 0 0.01 0.1")
     ap.add_argument("--latencies-ms", nargs="+", type=int, default=DEFAULT_LATENCIES_MS,
                     help="Execution latencies to sweep in milliseconds")
+    ap.add_argument("--inventory-per-currency-usdt", type=float, default=5_000.0,
+                    help="Initial USDT-equivalent balance for each currency on each exchange")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent
@@ -133,14 +180,18 @@ def main() -> None:
 
     def cfg(fee: float, lat_ms: int) -> L2Config:
         return L2Config(fee=fee, max_notional_usdt=args.notional,
+                        stake_fraction=args.stake_pct / 100.0,
                         min_profit_usdt=args.min_profit_usdt,
+                        min_profit_pct=args.min_profit_pct,
                         min_edge_bps=args.min_edge_bps,
                         depth=args.depth,
                         latency_ms=lat_ms, grid_ms=args.grid_ms,
+                        inventory_per_currency_usdt=args.inventory_per_currency_usdt,
                         max_quote_age_ms=args.max_quote_age_ms)
 
     scenarios = build_scenarios(args.date, args.fees_pct, args.latencies_ms, cfg)
     date_tag = args.date.replace("-", "")
+    output_tag = f"_{args.output_tag}" if args.output_tag else ""
 
     summaries = []
     import matplotlib.pyplot as plt
@@ -158,11 +209,12 @@ def main() -> None:
         summaries.append(s)
         print(f"  trades={s['trades_executed']}  pnl={s['total_pnl_usdt']:.2f} USDT  "
               f"return={s['total_return_pct']:.3f}%  raw_crosses={s['raw_cross_candidates']}  "
-              f"exec_candidates={s['executable_candidates']}")
+              f"exec_candidates={s['executable_candidates']}  "
+              f"inventory_skips={s['inventory_skips']}")
         print(f"  by_route={s['by_route']}")
 
-        res.equity_curve.to_csv(results / f"tardis_equity_{key}.csv", header=["equity"])
-        write_trades_csv(res.trades, results / f"tardis_trades_{key}.csv")
+        res.equity_curve.to_csv(results / f"tardis_equity_{key}{output_tag}.csv", header=["equity"])
+        write_trades_csv(res.trades, results / f"tardis_trades_{key}{output_tag}.csv")
         if not res.equity_curve.empty:
             res.equity_curve.plot(ax=ax, lw=1.1, label=title)
 
@@ -171,8 +223,8 @@ def main() -> None:
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    dated_plot_path = results / f"tardis_equity_{date_tag}.png"
-    latest_plot_path = results / "tardis_equity.png"
+    dated_plot_path = results / f"tardis_equity_{date_tag}{output_tag}.png"
+    latest_plot_path = results / f"tardis_equity{output_tag}.png"
     fig.savefig(dated_plot_path, dpi=120)
     fig.savefig(latest_plot_path, dpi=120)
     plt.close()
@@ -183,7 +235,10 @@ def main() -> None:
         "venues": venues,
         "assets": assets,
         "max_notional_usdt": args.notional,
+        "stake_pct": args.stake_pct,
+        "inventory_per_currency_usdt": args.inventory_per_currency_usdt,
         "min_profit_usdt": args.min_profit_usdt,
+        "min_profit_pct": args.min_profit_pct,
         "min_edge_bps": args.min_edge_bps,
         "book_depth_levels": args.depth,
         "grid_ms": args.grid_ms,
@@ -197,11 +252,104 @@ def main() -> None:
                  "max_quote_age_ms",
         "scenarios": summaries,
     }
-    dated_report_path = results / f"tardis_l2_report_{date_tag}.json"
-    latest_report_path = results / "tardis_l2_report.json"
+    dated_report_path = results / f"tardis_l2_report_{date_tag}{output_tag}.json"
+    latest_report_path = results / f"tardis_l2_report{output_tag}.json"
     for path in (dated_report_path, latest_report_path):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
+
+    if args.mode == "direct-plus-triangles":
+        triangle_pairs = (
+            parse_pairs(args.triangle_pairs)
+            if args.triangle_pairs
+            else triangle_pairs_from_assets(args.assets)
+        )
+        print(
+            "\nLoading Tardis L2 triangle panels "
+            f"({args.date}, pairs={' '.join(f'{b}/{q}' for b, q in triangle_pairs)})..."
+        )
+        pair_panels = load_l2_pair_panels(
+            pairs=triangle_pairs,
+            exchanges=args.exchanges,
+            date=args.date,
+            raw_dir=raw_dir,
+            grid_dir=grid_dir,
+            depth=args.depth,
+            grid_ms=args.grid_ms,
+        )
+        if len(pair_panels) < 3:
+            print("Skipping triangle mode: need at least three available pair panels.")
+        else:
+            triangle_summaries = []
+            tri_fig, tri_ax = plt.subplots(figsize=(10, 4))
+            for key, title, fee_pct, cfg in scenarios:
+                print(f"\nRunning triangles: {title}")
+                tri_res = run_l2_triangular_backtest(pair_panels, cfg)
+                s = tri_res.summary()
+                s["scenario"] = title
+                s["fee_pct"] = fee_pct
+                s["fee_per_leg"] = cfg.fee
+                s["latency_ms"] = cfg.latency_ms
+                s["max_quote_age_ms"] = cfg.max_quote_age_ms
+                triangle_summaries.append(s)
+                print(f"  trades={s['trades_executed']}  pnl={s['total_pnl_usdt']:.2f} USDT  "
+                      f"return={s['total_return_pct']:.3f}%  raw_cycles={s['raw_cycles']}  "
+                      f"exec_candidates={s['executable_candidates']}  "
+                      f"inventory_skips={s['inventory_skips']}")
+                print(f"  by_cycle={s['by_cycle']}")
+
+                tri_res.equity_curve.to_csv(
+                    results / f"tardis_triangles_equity_{key}{output_tag}.csv",
+                    header=["equity"],
+                )
+                write_triangular_trades_csv(
+                    tri_res.trades,
+                    results / f"tardis_triangles_trades_{key}{output_tag}.csv",
+                )
+                if not tri_res.equity_curve.empty:
+                    tri_res.equity_curve.plot(ax=tri_ax, lw=1.1, label=title)
+
+            pair_labels = [f"{base}/{quote}" for base, quote in triangle_pairs]
+            tri_ax.set_title(f"L2 same-exchange triangles — Tardis {args.date}")
+            tri_ax.set_ylabel("Capital (USDT)")
+            tri_ax.legend(fontsize=8)
+            tri_ax.grid(True, alpha=0.3)
+            tri_fig.tight_layout()
+            dated_tri_plot_path = results / f"tardis_triangles_equity_{date_tag}{output_tag}.png"
+            latest_tri_plot_path = results / f"tardis_triangles_equity{output_tag}.png"
+            tri_fig.savefig(dated_tri_plot_path, dpi=120)
+            tri_fig.savefig(latest_tri_plot_path, dpi=120)
+            plt.close(tri_fig)
+
+            triangle_meta = {
+                "data_source": "Tardis.dev free first-of-month L2 sample (book_snapshot_25)",
+                "date": args.date,
+                "venues": args.exchanges,
+                "pairs": pair_labels,
+                "max_notional_usdt": args.notional,
+                "stake_pct": args.stake_pct,
+                "inventory_per_currency_usdt": args.inventory_per_currency_usdt,
+                "min_profit_usdt": args.min_profit_usdt,
+                "min_profit_pct": args.min_profit_pct,
+                "min_edge_bps": args.min_edge_bps,
+                "book_depth_levels": args.depth,
+                "grid_ms": args.grid_ms,
+                "max_quote_age_ms": args.max_quote_age_ms,
+                "fees_pct": args.fees_pct,
+                "latencies_ms": args.latencies_ms,
+                "model": "same-exchange triangular cycles length 3, signal graph built "
+                         "from visible books at t, execution on first grid point at/after "
+                         "t+Δ, each leg walked through the real L2 book, spot buy fee "
+                         "deducted from received base and spot sell fee deducted from "
+                         "quote proceeds",
+                "scenarios": triangle_summaries,
+            }
+            dated_tri_report_path = results / f"tardis_triangles_report_{date_tag}{output_tag}.json"
+            latest_tri_report_path = results / f"tardis_triangles_report{output_tag}.json"
+            for path in (dated_tri_report_path, latest_tri_report_path):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(triangle_meta, f, indent=2, ensure_ascii=False)
+            print(f"Saved triangles: {dated_tri_report_path}, {dated_tri_plot_path}")
 
     print(f"\nSaved: {dated_report_path}, {dated_plot_path}")
     print(f"Latest aliases: {latest_report_path}, {latest_plot_path}")

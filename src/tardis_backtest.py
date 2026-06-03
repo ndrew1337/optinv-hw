@@ -21,23 +21,31 @@ from __future__ import annotations
 
 from bisect import bisect_left
 from dataclasses import dataclass, field
+from heapq import heappop, heappush
 from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 
+from .bellman_ford import ArbitrageCycle, enumerate_triangles
+from .graph import ExchangeGraph
+
 
 @dataclass
 class L2Config:
     fee: float = 0.001           # taker fee per leg (0.1%)
-    max_notional_usdt: float = 2_000.0   # per-opportunity size cap
-    min_profit_usdt: float = 0.01        # ignore sub-cent edges
+    max_notional_usdt: float | None = None   # optional per-opportunity USDT cap
+    stake_fraction: float | None = None      # None = fixed notional, otherwise inventory share
+    min_profit_usdt: float = 0.0         # optional absolute expected-PnL floor
+    min_profit_pct: float = 0.0          # expected PnL as percent of notional
     min_edge_bps: float = 0.0    # require net edge after fees, in basis points
     latency_ms: int = 0          # execution delay vs. signal (milliseconds)
     grid_ms: int = 100           # time-grid resolution (must match loaded panels)
     depth: int = 5               # book levels used for slippage
     start_capital_usdt: float = 10_000.0
+    inventory_per_currency_usdt: float | None = None
     max_quote_age_ms: int = 250  # cap stale forward-filled books
+    enforce_inventory: bool = True
 
 
 @dataclass
@@ -62,6 +70,7 @@ class L2Result:
     grid_points: int = 0
     raw_crosses: int = 0
     executable_candidates: int = 0
+    inventory_skips: int = 0
     start_capital_usdt: float = 10_000.0
 
     def summary(self) -> Dict:
@@ -72,6 +81,7 @@ class L2Result:
             "grid_points": self.grid_points,
             "raw_cross_candidates": self.raw_crosses,
             "executable_candidates": self.executable_candidates,
+            "inventory_skips": self.inventory_skips,
             "trades_executed": len(self.trades),
             "total_pnl_usdt": float(pnl),
             "total_return_pct": float((cap1 / cap0 - 1) * 100) if cap0 else 0.0,
@@ -79,6 +89,52 @@ class L2Result:
             "avg_trade_pnl": float(pnl / len(self.trades)) if self.trades else 0.0,
             "by_asset": _pnl_by_key(self.trades, lambda t: t.asset),
             "by_route": _pnl_by_key(self.trades, lambda t: f"{t.buy_ex}->{t.sell_ex}"),
+        }
+
+
+@dataclass
+class L2TriangularTrade:
+    ts: int
+    exec_ts: int
+    exchange: str
+    cycle: List[str]
+    start_currency: str
+    start_amount: float
+    end_amount: float
+    start_value_usdt: float
+    end_value_usdt: float
+    pnl: float
+    signal_edge_bps: float
+    signal_expected_pnl: float
+
+
+@dataclass
+class L2TriangularResult:
+    trades: List[L2TriangularTrade] = field(default_factory=list)
+    equity_curve: pd.Series = field(default_factory=pd.Series)
+    grid_points: int = 0
+    raw_cycles: int = 0
+    executable_candidates: int = 0
+    inventory_skips: int = 0
+    start_capital_usdt: float = 10_000.0
+
+    def summary(self) -> Dict:
+        pnl = sum(t.pnl for t in self.trades)
+        cap0 = self.start_capital_usdt
+        cap1 = cap0 + pnl
+        return {
+            "grid_points": self.grid_points,
+            "raw_cross_candidates": self.raw_cycles,
+            "raw_cycles": self.raw_cycles,
+            "executable_candidates": self.executable_candidates,
+            "inventory_skips": self.inventory_skips,
+            "trades_executed": len(self.trades),
+            "total_pnl_usdt": float(pnl),
+            "total_return_pct": float((cap1 / cap0 - 1) * 100) if cap0 else 0.0,
+            "final_capital": float(cap1),
+            "avg_trade_pnl": float(pnl / len(self.trades)) if self.trades else 0.0,
+            "by_exchange": _tri_pnl_by_key(self.trades, lambda t: t.exchange),
+            "by_cycle": _tri_pnl_by_key(self.trades, lambda t: "->".join(t.cycle)),
         }
 
 
@@ -90,6 +146,55 @@ def _pnl_by_key(trades: List[L2Trade], key) -> Dict[str, Dict]:
         d["trades"] += 1
         d["pnl"] += t.pnl
     return {k: {"trades": v["trades"], "pnl": round(v["pnl"], 4)} for k, v in out.items()}
+
+
+def _tri_pnl_by_key(trades: List[L2TriangularTrade], key) -> Dict[str, Dict]:
+    out: Dict[str, Dict] = {}
+    for t in trades:
+        k = key(t)
+        d = out.setdefault(k, {"trades": 0, "pnl": 0.0})
+        d["trades"] += 1
+        d["pnl"] += t.pnl
+    return {k: {"trades": v["trades"], "pnl": round(v["pnl"], 4)} for k, v in out.items()}
+
+
+def _min_signal_profit_usdt(config: L2Config, stake_value_usdt: float) -> float:
+    pct_floor = stake_value_usdt * (config.min_profit_pct / 100.0)
+    return max(config.min_profit_usdt, pct_floor)
+
+
+def _min_signal_edge_bps(config: L2Config) -> float:
+    pct_floor_bps = config.min_profit_pct * 100.0
+    return max(config.min_edge_bps, pct_floor_bps)
+
+
+def _apply_notional_cap(amount: float, value_usdt: float, config: L2Config) -> tuple[float, float]:
+    if config.max_notional_usdt is None or value_usdt <= config.max_notional_usdt:
+        return amount, value_usdt
+    if value_usdt <= 0:
+        return 0.0, 0.0
+    scale = config.max_notional_usdt / value_usdt
+    return amount * scale, config.max_notional_usdt
+
+
+def _stake_fraction(config: L2Config) -> float:
+    return 1.0 if config.stake_fraction is None else config.stake_fraction
+
+
+def _fixed_or_fractional_notional(config: L2Config) -> float:
+    if config.stake_fraction is None:
+        return (
+            config.max_notional_usdt
+            if config.max_notional_usdt is not None
+            else config.start_capital_usdt
+        )
+    return config.start_capital_usdt * config.stake_fraction
+
+
+def _canonical_cycle_key(cycle: ArbitrageCycle) -> tuple[str, ...]:
+    nodes = cycle.currencies[:-1]
+    rotations = [tuple(nodes[i:] + nodes[:i]) for i in range(len(nodes))]
+    return min(rotations)
 
 
 def _walk_buy(row: dict, size: float, depth: int) -> Tuple[float, float]:
@@ -164,114 +269,582 @@ def _is_fresh(row: dict, t: int, max_age_ms: int) -> bool:
     return 0 <= t - int(source_ts) <= max_age_ms
 
 
+@dataclass(frozen=True)
+class _AssetView:
+    venues: List[str]
+    tss: List[int]
+    tss_set: set[int]
+    aligned: Dict[str, dict]
+
+
+@dataclass(frozen=True)
+class _PendingTrade:
+    seq: int
+    ts: int
+    exec_ts: int
+    asset: str
+    buy_ex: str
+    sell_ex: str
+    reserved_quote: float
+    reserved_asset: float
+    signal_edge_bps: float
+    signal_expected_pnl: float
+
+
+@dataclass(frozen=True)
+class _PairAction:
+    pair: str
+    side: str
+
+
+@dataclass(frozen=True)
+class _ExchangePairView:
+    exchange: str
+    pairs: List[str]
+    tss: List[int]
+    tss_set: set[int]
+    aligned: Dict[str, dict]
+
+
+@dataclass(frozen=True)
+class _PendingTriangularTrade:
+    seq: int
+    ts: int
+    exec_ts: int
+    exchange: str
+    cycle: List[str]
+    reserved_currency: str
+    reserved_amount: float
+    signal_start_value_usdt: float
+    signal_edge_bps: float
+    signal_expected_pnl: float
+
+
+def _initial_mid(aligned: Dict[str, dict], tss: List[int], venue: str, max_age_ms: int) -> float:
+    for t in tss:
+        row = aligned[venue].get(t)
+        if row is None or not _is_fresh(row, t, max_age_ms):
+            continue
+        ask = row.get("asks[0].price")
+        bid = row.get("bids[0].price")
+        if (
+            ask is not None
+            and bid is not None
+            and np.isfinite(ask)
+            and np.isfinite(bid)
+            and ask > 0
+            and bid > 0
+        ):
+            return (float(ask) + float(bid)) / 2.0
+    return 0.0
+
+
+def _initial_balances(
+    asset_views: Dict[str, _AssetView],
+    config: L2Config,
+) -> tuple[Dict[str, float], Dict[Tuple[str, str], float], float]:
+    venues = sorted({venue for view in asset_views.values() for venue in view.venues})
+    assets = sorted(asset_views)
+    quote_balances = {venue: 0.0 for venue in venues}
+    asset_balances = {(venue, asset): 0.0 for venue in venues for asset in assets}
+    if not venues or not assets:
+        return quote_balances, asset_balances, 0.0
+
+    if config.inventory_per_currency_usdt is not None:
+        per_currency = config.inventory_per_currency_usdt
+        for venue in venues:
+            quote_balances[venue] = per_currency
+        for asset, view in asset_views.items():
+            for venue in view.venues:
+                mid = _initial_mid(view.aligned, view.tss, venue, config.max_quote_age_ms)
+                if mid > 0:
+                    asset_balances[(venue, asset)] = per_currency / mid
+        start_capital = per_currency * len(venues) * (len(assets) + 1)
+        return quote_balances, asset_balances, start_capital
+
+    quote_budget = config.start_capital_usdt * 0.5
+    asset_budget = config.start_capital_usdt - quote_budget
+    quote_per_venue = quote_budget / len(venues)
+    for venue in venues:
+        quote_balances[venue] = quote_per_venue
+
+    asset_budget_per_slot = asset_budget / (len(venues) * len(assets))
+    for asset, view in asset_views.items():
+        for venue in view.venues:
+            mid = _initial_mid(view.aligned, view.tss, venue, config.max_quote_age_ms)
+            if mid > 0:
+                asset_balances[(venue, asset)] = asset_budget_per_slot / mid
+
+    return quote_balances, asset_balances, config.start_capital_usdt
+
+
+def _execute_pending_trade(
+    pending: _PendingTrade,
+    view: _AssetView,
+    config: L2Config,
+    quote_balances: Dict[str, float],
+    asset_balances: Dict[Tuple[str, str], float],
+) -> L2Trade | None:
+    buy_row = view.aligned[pending.buy_ex].get(pending.exec_ts)
+    sell_row = view.aligned[pending.sell_ex].get(pending.exec_ts)
+    if buy_row is None or sell_row is None:
+        return None
+    if not _is_fresh(buy_row, pending.exec_ts, config.max_quote_age_ms):
+        return None
+    if not _is_fresh(sell_row, pending.exec_ts, config.max_quote_age_ms):
+        return None
+
+    exec_ask = buy_row.get("asks[0].price")
+    if exec_ask is None or not np.isfinite(exec_ask) or exec_ask <= 0:
+        return None
+
+    fee_factor = 1.0 - config.fee
+    if fee_factor <= 0:
+        return None
+
+    depth = config.depth
+    quote_cap = pending.reserved_quote
+    sell_asset_cap = pending.reserved_asset
+    target_gross_qty = quote_cap / exec_ask
+    gross_buy_size = min(
+        target_gross_qty,
+        _depth_sum(buy_row, "asks", depth),
+        _depth_sum(sell_row, "bids", depth) / fee_factor,
+        sell_asset_cap / fee_factor,
+    )
+    if gross_buy_size <= 0:
+        return None
+
+    f_buy, _ = _walk_buy(buy_row, gross_buy_size, depth)
+    size = f_buy * fee_factor
+    f_sell, _ = _walk_sell(sell_row, size, depth)
+    size = min(size, f_sell, sell_asset_cap)
+    if size <= 0:
+        return None
+
+    gross_buy_size = size / fee_factor
+    _, buy_cost = _walk_buy(buy_row, gross_buy_size, depth)
+    _, sell_proceeds = _walk_sell(sell_row, size, depth)
+    sell_proceeds *= fee_factor
+    pnl = sell_proceeds - buy_cost
+
+    if config.enforce_inventory:
+        quote_balances[pending.buy_ex] += max(0.0, pending.reserved_quote - buy_cost)
+        asset_balances[(pending.buy_ex, pending.asset)] += size
+        asset_balances[(pending.sell_ex, pending.asset)] += max(
+            0.0,
+            pending.reserved_asset - size,
+        )
+        quote_balances[pending.sell_ex] += sell_proceeds
+
+    return L2Trade(
+        ts=pending.ts,
+        exec_ts=pending.exec_ts,
+        asset=pending.asset,
+        buy_ex=pending.buy_ex,
+        sell_ex=pending.sell_ex,
+        size=size,
+        buy_cost=buy_cost,
+        sell_proceeds=sell_proceeds,
+        pnl=pnl,
+        signal_edge_bps=pending.signal_edge_bps,
+        signal_expected_pnl=pending.signal_expected_pnl,
+    )
+
+
+def _release_pending_reservation(
+    pending: _PendingTrade,
+    quote_balances: Dict[str, float],
+    asset_balances: Dict[Tuple[str, str], float],
+) -> None:
+    quote_balances[pending.buy_ex] += pending.reserved_quote
+    asset_balances[(pending.sell_ex, pending.asset)] += pending.reserved_asset
+
+
+def _walk_buy_by_quote(row: dict, quote_amount: float, depth: int) -> Tuple[float, float]:
+    """Spend quote into asks. Returns (gross_base_received_before_fee, quote_spent)."""
+    remaining, base_received = quote_amount, 0.0
+    for i in range(depth):
+        p = row.get(f"asks[{i}].price")
+        a = row.get(f"asks[{i}].amount")
+        if p is None or a is None or not np.isfinite(p) or not np.isfinite(a) or p <= 0 or a <= 0:
+            continue
+        spend = min(remaining, a * p)
+        base_received += spend / p
+        remaining -= spend
+        if remaining <= 1e-12:
+            break
+    return base_received, quote_amount - remaining
+
+
+def _pair_defs_from_panels(
+    pair_panels: Dict[Tuple[str, str], pd.DataFrame],
+) -> Dict[str, Tuple[str, str]]:
+    defs: Dict[str, Tuple[str, str]] = {}
+    for (_, pair), df in pair_panels.items():
+        if df.empty or "base" not in df.columns or "quote" not in df.columns:
+            continue
+        base = str(df["base"].iloc[0])
+        quote = str(df["quote"].iloc[0])
+        existing = defs.get(pair)
+        if existing is not None and existing != (base, quote):
+            raise ValueError(f"Conflicting pair definition for {pair}: {existing} vs {(base, quote)}")
+        defs[pair] = (base, quote)
+    return defs
+
+
+def _align_exchange_pairs(
+    pair_panels: Dict[Tuple[str, str], pd.DataFrame],
+    exchange: str,
+) -> _ExchangePairView | None:
+    pairs = sorted(pair for (ex, pair) in pair_panels if ex == exchange)
+    if len(pairs) < 3:
+        return None
+    tss = sorted(set().union(*[set(pair_panels[(exchange, pair)]["ts"]) for pair in pairs]))
+    if not tss:
+        return None
+    idx = pd.Index(tss, name="ts")
+    aligned: Dict[str, dict] = {}
+    for pair in pairs:
+        df = pair_panels[(exchange, pair)].copy()
+        df["source_ts"] = df["ts"]
+        df = df.set_index("ts").reindex(idx).ffill()
+        aligned[pair] = df.to_dict("index")
+    return _ExchangePairView(
+        exchange=exchange,
+        pairs=pairs,
+        tss=tss,
+        tss_set=set(tss),
+        aligned=aligned,
+    )
+
+
+def _build_l2_exchange_graph(
+    rows_by_pair: Dict[str, dict],
+    pair_defs: Dict[str, Tuple[str, str]],
+    config: L2Config,
+    t: int,
+) -> Tuple[ExchangeGraph, Dict[Tuple[str, str], _PairAction]]:
+    graph = ExchangeGraph(fee=config.fee)
+    actions: Dict[Tuple[str, str], _PairAction] = {}
+    for pair, row in rows_by_pair.items():
+        if row is None or not _is_fresh(row, t, config.max_quote_age_ms):
+            continue
+        base, quote = pair_defs[pair]
+        ask = row.get("asks[0].price")
+        bid = row.get("bids[0].price")
+        if ask is not None and np.isfinite(ask) and ask > 0:
+            graph.add_directed(quote, base, 1.0 / ask)
+            actions[(quote, base)] = _PairAction(pair=pair, side="buy")
+        if bid is not None and np.isfinite(bid) and bid > 0:
+            graph.add_directed(base, quote, bid)
+            actions[(base, quote)] = _PairAction(pair=pair, side="sell")
+    return graph, actions
+
+
+def _rotate_cycle_to(cycle: ArbitrageCycle, start_currency: str) -> List[str]:
+    nodes = cycle.currencies[:-1]
+    i = nodes.index(start_currency)
+    return nodes[i:] + nodes[:i] + [start_currency]
+
+
+def _best_triangle_from(
+    graph: ExchangeGraph,
+    start_currency: str,
+) -> Tuple[ArbitrageCycle, List[str]] | None:
+    best: Tuple[ArbitrageCycle, List[str]] | None = None
+    for cycle in enumerate_triangles(graph):
+        if cycle.length != 3 or start_currency not in cycle.currencies[:-1]:
+            continue
+        rotated = _rotate_cycle_to(cycle, start_currency)
+        if best is None or cycle.total_weight < best[0].total_weight:
+            best = (cycle, rotated)
+    return best
+
+
+def _currency_value_usdt(
+    currency: str,
+    rows_by_pair: Dict[str, dict],
+    pair_defs: Dict[str, Tuple[str, str]],
+) -> float | None:
+    if currency == "USDT":
+        return 1.0
+    for pair, (base, quote) in pair_defs.items():
+        row = rows_by_pair.get(pair)
+        if row is None:
+            continue
+        ask = row.get("asks[0].price")
+        bid = row.get("bids[0].price")
+        if ask is None or bid is None or not np.isfinite(ask) or not np.isfinite(bid):
+            continue
+        if ask <= 0 or bid <= 0:
+            continue
+        mid = (float(ask) + float(bid)) / 2.0
+        if base == currency and quote == "USDT":
+            return mid
+        if base == "USDT" and quote == currency:
+            return 1.0 / mid
+    return None
+
+
+def _initial_currency_value_usdt(
+    view: _ExchangePairView,
+    currency: str,
+    pair_defs: Dict[str, Tuple[str, str]],
+    max_age_ms: int,
+) -> float | None:
+    for t in view.tss:
+        rows_by_pair = _rows_at(view, t)
+        fresh_rows = {
+            pair: row
+            for pair, row in rows_by_pair.items()
+            if row is not None and _is_fresh(row, t, max_age_ms)
+        }
+        value = _currency_value_usdt(currency, fresh_rows, pair_defs)
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _execute_triangular_cycle(
+    cycle: List[str],
+    actions: Dict[Tuple[str, str], _PairAction],
+    rows_by_pair: Dict[str, dict],
+    amount: float,
+    config: L2Config,
+) -> float | None:
+    fee_factor = 1.0 - config.fee
+    if fee_factor <= 0 or amount <= 0:
+        return None
+
+    current_amount = amount
+    for u, v in zip(cycle, cycle[1:]):
+        action = actions.get((u, v))
+        if action is None:
+            return None
+        row = rows_by_pair.get(action.pair)
+        if row is None:
+            return None
+
+        if action.side == "buy":
+            gross_received, spent = _walk_buy_by_quote(row, current_amount, config.depth)
+            if spent < current_amount * (1.0 - 1e-9) or gross_received <= 0:
+                return None
+            current_amount = gross_received * fee_factor
+        else:
+            filled, proceeds = _walk_sell(row, current_amount, config.depth)
+            if filled < current_amount * (1.0 - 1e-9) or proceeds <= 0:
+                return None
+            current_amount = proceeds * fee_factor
+
+    return current_amount if cycle[0] == cycle[-1] else None
+
+
+def _rows_at(view: _ExchangePairView, t: int) -> Dict[str, dict]:
+    return {pair: view.aligned[pair].get(t) for pair in view.pairs}
+
+
+def _execute_pending_triangle(
+    pending: _PendingTriangularTrade,
+    view: _ExchangePairView,
+    pair_defs: Dict[str, Tuple[str, str]],
+    config: L2Config,
+) -> L2TriangularTrade | None:
+    rows_by_pair = _rows_at(view, pending.exec_ts)
+    _, actions = _build_l2_exchange_graph(rows_by_pair, pair_defs, config, pending.exec_ts)
+    value_usdt = _currency_value_usdt(pending.reserved_currency, rows_by_pair, pair_defs)
+    if value_usdt is None or value_usdt <= 0:
+        return None
+    end_amount = _execute_triangular_cycle(
+        pending.cycle,
+        actions,
+        rows_by_pair,
+        pending.reserved_amount,
+        config,
+    )
+    if end_amount is None:
+        return None
+    start_value_usdt = pending.reserved_amount * value_usdt
+    end_value_usdt = end_amount * value_usdt
+    return L2TriangularTrade(
+        ts=pending.ts,
+        exec_ts=pending.exec_ts,
+        exchange=pending.exchange,
+        cycle=pending.cycle,
+        start_currency=pending.reserved_currency,
+        start_amount=pending.reserved_amount,
+        end_amount=end_amount,
+        start_value_usdt=start_value_usdt,
+        end_value_usdt=end_value_usdt,
+        pnl=end_value_usdt - start_value_usdt,
+        signal_edge_bps=pending.signal_edge_bps,
+        signal_expected_pnl=pending.signal_expected_pnl,
+    )
+
+
 def run_l2_backtest(
     panels: Dict[Tuple[str, str], pd.DataFrame],
     config: L2Config,
 ) -> L2Result:
     assets = sorted({a for (_, a) in panels})
+    asset_views: Dict[str, _AssetView] = {}
+    for asset in assets:
+        venues, tss, aligned = _align_asset(panels, asset)
+        if len(venues) >= 2 and tss:
+            asset_views[asset] = _AssetView(
+                venues=venues,
+                tss=tss,
+                tss_set=set(tss),
+                aligned=aligned,
+            )
+
     trades: List[L2Trade] = []
     raw_crosses = 0
     executable_candidates = 0
+    inventory_skips = 0
+    pending: list[tuple[int, int, _PendingTrade]] = []
+    seq = 0
+    quote_balances, asset_balances, start_capital = _initial_balances(asset_views, config)
+    pnl_by_exec_ts: Dict[int, float] = {}
 
-    for asset in assets:
-        venues, tss, aligned = _align_asset(panels, asset)
-        if len(venues) < 2:
-            continue
-        depth = config.depth
+    all_ts = sorted(set().union(*[set(df["ts"]) for df in panels.values()]))
+    for t in all_ts:
+        while pending and pending[0][0] <= t:
+            _, _, pending_trade = heappop(pending)
+            view = asset_views[pending_trade.asset]
+            trade = _execute_pending_trade(
+                pending_trade,
+                view,
+                config,
+                quote_balances,
+                asset_balances,
+            )
+            if trade is None:
+                if config.enforce_inventory:
+                    _release_pending_reservation(
+                        pending_trade,
+                        quote_balances,
+                        asset_balances,
+                    )
+                continue
+            executable_candidates += 1
+            trades.append(trade)
+            pnl_by_exec_ts[trade.exec_ts] = pnl_by_exec_ts.get(trade.exec_ts, 0.0) + trade.pnl
 
-        for n, t in enumerate(tss):
-            # signal time t, execution on the first grid point at or after t+latency
-            te_idx = bisect_left(tss, t + config.latency_ms, lo=n)
-            if te_idx >= len(tss):
-                break
-            te = tss[te_idx]
+        for asset, view in asset_views.items():
+            if t not in view.tss_set:
+                continue
+            n = bisect_left(view.tss, t)
+            te_idx = bisect_left(view.tss, t + config.latency_ms, lo=n)
+            if te_idx >= len(view.tss):
+                continue
+            te = view.tss[te_idx]
 
-            # pick buy venue (lowest ask) / sell venue (highest bid) at SIGNAL time
             best_ask_ex, best_ask = None, float("inf")
             best_bid_ex, best_bid = None, float("-inf")
-            for ex in venues:
-                r = aligned[ex].get(t)
-                if r is None or not _is_fresh(r, t, config.max_quote_age_ms):
+            for ex in view.venues:
+                row = view.aligned[ex].get(t)
+                if row is None or not _is_fresh(row, t, config.max_quote_age_ms):
                     continue
-                a0 = r.get("asks[0].price")
-                b0 = r.get("bids[0].price")
-                if a0 is not None and np.isfinite(a0) and a0 < best_ask:
-                    best_ask, best_ask_ex = a0, ex
-                if b0 is not None and np.isfinite(b0) and b0 > best_bid:
-                    best_bid, best_bid_ex = b0, ex
+                ask = row.get("asks[0].price")
+                bid = row.get("bids[0].price")
+                if ask is not None and np.isfinite(ask) and ask < best_ask:
+                    best_ask, best_ask_ex = ask, ex
+                if bid is not None and np.isfinite(bid) and bid > best_bid:
+                    best_bid, best_bid_ex = bid, ex
 
             if best_ask_ex is None or best_bid_ex is None or best_ask_ex == best_bid_ex:
                 continue
-            if best_bid <= best_ask:  # no raw cross before costs
+            if best_bid <= best_ask:
                 continue
             raw_crosses += 1
-            signal_gross_edge = (best_bid / best_ask) * (1.0 - config.fee) ** 2 - 1.0
-            signal_edge_bps = signal_gross_edge * 10_000
-            signal_expected_pnl = config.max_notional_usdt * signal_gross_edge
-            if (
-                signal_expected_pnl < config.min_profit_usdt
-                or signal_edge_bps < config.min_edge_bps
-            ):
-                continue
-
-            # execute on the books as they ACTUALLY were at t+latency
-            buy_row = aligned[best_ask_ex].get(te)
-            sell_row = aligned[best_bid_ex].get(te)
-            if buy_row is None or sell_row is None:
-                continue
-            if not _is_fresh(buy_row, te, config.max_quote_age_ms):
-                continue
-            if not _is_fresh(sell_row, te, config.max_quote_age_ms):
-                continue
-            exec_ask = buy_row.get("asks[0].price")
-            if exec_ask is None or not np.isfinite(exec_ask) or exec_ask <= 0:
-                continue
 
             fee_factor = 1.0 - config.fee
             if fee_factor <= 0:
                 continue
-            target_gross_qty = config.max_notional_usdt / exec_ask
-            gross_buy_size = min(
-                target_gross_qty,
-                _depth_sum(buy_row, "asks", depth),
-                _depth_sum(sell_row, "bids", depth) / fee_factor,
+            if config.enforce_inventory:
+                if config.stake_fraction is None:
+                    reserved_quote = _fixed_or_fractional_notional(config)
+                else:
+                    stake_fraction = _stake_fraction(config)
+                    quote_capacity = quote_balances.get(best_ask_ex, 0.0) * stake_fraction
+                    asset_capacity = (
+                        asset_balances.get((best_bid_ex, asset), 0.0)
+                        * stake_fraction
+                        * best_ask
+                        / fee_factor
+                    )
+                    reserved_quote = min(quote_capacity, asset_capacity)
+            else:
+                reserved_quote = _fixed_or_fractional_notional(config)
+            _, reserved_quote = _apply_notional_cap(1.0, reserved_quote, config)
+            if reserved_quote <= 0:
+                continue
+
+            signal_gross_edge = (best_bid / best_ask) * fee_factor**2 - 1.0
+            signal_edge_bps = signal_gross_edge * 10_000
+            signal_expected_pnl = reserved_quote * signal_gross_edge
+            if (
+                signal_expected_pnl < _min_signal_profit_usdt(config, reserved_quote)
+                or signal_edge_bps < _min_signal_edge_bps(config)
+            ):
+                continue
+
+            reserved_asset = (reserved_quote / best_ask) * fee_factor
+            if config.enforce_inventory:
+                if quote_balances.get(best_ask_ex, 0.0) < reserved_quote:
+                    inventory_skips += 1
+                    continue
+                if asset_balances.get((best_bid_ex, asset), 0.0) < reserved_asset:
+                    inventory_skips += 1
+                    continue
+                quote_balances[best_ask_ex] -= reserved_quote
+                asset_balances[(best_bid_ex, asset)] -= reserved_asset
+
+            pending_trade = _PendingTrade(
+                seq=seq,
+                ts=t,
+                exec_ts=te,
+                asset=asset,
+                buy_ex=best_ask_ex,
+                sell_ex=best_bid_ex,
+                reserved_quote=reserved_quote,
+                reserved_asset=reserved_asset,
+                signal_edge_bps=signal_edge_bps,
+                signal_expected_pnl=signal_expected_pnl,
             )
-            if gross_buy_size <= 0:
-                continue
+            heappush(pending, (te, seq, pending_trade))
+            seq += 1
 
-            f_buy, _ = _walk_buy(buy_row, gross_buy_size, depth)
-            size = f_buy * fee_factor
-            f_sell, _ = _walk_sell(sell_row, size, depth)
-            size = min(size, f_sell)
-            if size <= 0:
-                continue
-            gross_buy_size = size / fee_factor
-            _, buy_cost = _walk_buy(buy_row, gross_buy_size, depth)
-            _, sell_proceeds = _walk_sell(sell_row, size, depth)
-
-            sell_proceeds *= (1.0 - config.fee)
-            pnl = sell_proceeds - buy_cost
-
-            executable_candidates += 1
-            trades.append(
-                L2Trade(
-                    ts=t, exec_ts=te, asset=asset,
-                    buy_ex=best_ask_ex, sell_ex=best_bid_ex,
-                    size=size, buy_cost=buy_cost,
-                    sell_proceeds=sell_proceeds, pnl=pnl,
-                    signal_edge_bps=signal_edge_bps,
-                    signal_expected_pnl=signal_expected_pnl,
+    while pending:
+        _, _, pending_trade = heappop(pending)
+        view = asset_views[pending_trade.asset]
+        trade = _execute_pending_trade(
+            pending_trade,
+            view,
+            config,
+            quote_balances,
+            asset_balances,
+        )
+        if trade is None:
+            if config.enforce_inventory:
+                _release_pending_reservation(
+                    pending_trade,
+                    quote_balances,
+                    asset_balances,
                 )
-            )
+            continue
+        executable_candidates += 1
+        trades.append(trade)
+        pnl_by_exec_ts[trade.exec_ts] = pnl_by_exec_ts.get(trade.exec_ts, 0.0) + trade.pnl
 
     # Equity curve built from CHRONOLOGICALLY SORTED trades across all assets,
     # so the curve is time-consistent regardless of per-asset processing order.
-    all_ts = sorted(set().union(*[set(df["ts"]) for df in panels.values()]))
     pnl_at = pd.Series(0.0, index=all_ts)
-    for tr in trades:
-        if tr.exec_ts in pnl_at.index:
-            pnl_at.loc[tr.exec_ts] += tr.pnl
-    equity = config.start_capital_usdt + pnl_at.cumsum()
+    for ts, pnl in pnl_by_exec_ts.items():
+        if ts in pnl_at.index:
+            pnl_at.loc[ts] += pnl
+    equity = start_capital + pnl_at.cumsum()
     equity.index = pd.to_datetime(all_ts, unit="ms", utc=True)
 
     return L2Result(
@@ -280,5 +853,190 @@ def run_l2_backtest(
         grid_points=len(all_ts),
         raw_crosses=raw_crosses,
         executable_candidates=executable_candidates,
-        start_capital_usdt=config.start_capital_usdt,
+        inventory_skips=inventory_skips,
+        start_capital_usdt=start_capital,
+    )
+
+
+def run_l2_triangular_backtest(
+    pair_panels: Dict[Tuple[str, str], pd.DataFrame],
+    config: L2Config,
+    start_currency: str = "USDT",
+) -> L2TriangularResult:
+    """Same-exchange triangular L2 arbitrage with signal-time graph search.
+
+    The signal graph is built only from books visible at t. If a signal passes
+    filters, execution is attempted on the first grid point at/after
+    t + latency_ms using those execution-time books.
+    """
+    pair_defs = _pair_defs_from_panels(pair_panels)
+    exchange_views: Dict[str, _ExchangePairView] = {}
+    for exchange in sorted({ex for ex, _ in pair_panels}):
+        view = _align_exchange_pairs(pair_panels, exchange)
+        if view is not None:
+            exchange_views[exchange] = view
+
+    if not exchange_views:
+        return L2TriangularResult(start_capital_usdt=config.start_capital_usdt)
+
+    all_ts = sorted(set().union(*[set(df["ts"]) for df in pair_panels.values()]))
+    currencies = sorted({currency for pair in pair_defs.values() for currency in pair})
+    if config.inventory_per_currency_usdt is not None:
+        start_capital = config.inventory_per_currency_usdt * len(exchange_views) * len(currencies)
+    else:
+        start_capital = config.start_capital_usdt
+    currency_balances: Dict[Tuple[str, str], float] = {}
+    for exchange, view in exchange_views.items():
+        for currency in currencies:
+            if config.inventory_per_currency_usdt is not None:
+                value = _initial_currency_value_usdt(
+                    view,
+                    currency,
+                    pair_defs,
+                    config.max_quote_age_ms,
+                )
+                currency_balances[(exchange, currency)] = (
+                    config.inventory_per_currency_usdt / value
+                    if value is not None and value > 0
+                    else 0.0
+                )
+            elif currency == start_currency:
+                currency_balances[(exchange, currency)] = config.start_capital_usdt / len(exchange_views)
+            else:
+                currency_balances[(exchange, currency)] = 0.0
+    pending: list[tuple[int, int, _PendingTriangularTrade]] = []
+    trades: List[L2TriangularTrade] = []
+    pnl_by_exec_ts: Dict[int, float] = {}
+    raw_cycles = 0
+    executable_candidates = 0
+    inventory_skips = 0
+    seq = 0
+
+    def handle_pending(pending_trade: _PendingTriangularTrade) -> None:
+        nonlocal executable_candidates
+        view = exchange_views[pending_trade.exchange]
+        trade = _execute_pending_triangle(pending_trade, view, pair_defs, config)
+        if trade is None:
+            if config.enforce_inventory:
+                currency_balances[
+                    (pending_trade.exchange, pending_trade.reserved_currency)
+                ] += pending_trade.reserved_amount
+            return
+        executable_candidates += 1
+        trades.append(trade)
+        pnl_by_exec_ts[trade.exec_ts] = pnl_by_exec_ts.get(trade.exec_ts, 0.0) + trade.pnl
+        if config.enforce_inventory:
+            currency_balances[(trade.exchange, trade.start_currency)] += trade.end_amount
+
+    for t in all_ts:
+        while pending and pending[0][0] <= t:
+            _, _, pending_trade = heappop(pending)
+            handle_pending(pending_trade)
+
+        for exchange, view in exchange_views.items():
+            if t not in view.tss_set:
+                continue
+            n = bisect_left(view.tss, t)
+            te_idx = bisect_left(view.tss, t + config.latency_ms, lo=n)
+            if te_idx >= len(view.tss):
+                continue
+            te = view.tss[te_idx]
+
+            rows_by_pair = _rows_at(view, t)
+            graph, actions = _build_l2_exchange_graph(rows_by_pair, pair_defs, config, t)
+            best_signal = None
+            seen_cycles: set[tuple[str, ...]] = set()
+            for signal_cycle in enumerate_triangles(graph):
+                if signal_cycle.length != 3:
+                    continue
+                cycle_key = _canonical_cycle_key(signal_cycle)
+                if cycle_key in seen_cycles:
+                    continue
+                seen_cycles.add(cycle_key)
+                raw_cycles += 1
+                for cycle_start in signal_cycle.currencies[:-1]:
+                    cycle_path = _rotate_cycle_to(signal_cycle, cycle_start)
+                    value_usdt = _currency_value_usdt(cycle_start, rows_by_pair, pair_defs)
+                    if value_usdt is None or value_usdt <= 0:
+                        continue
+                    balance = currency_balances.get((exchange, cycle_start), 0.0)
+                    stake_amount = balance * _stake_fraction(config)
+                    stake_value_usdt = stake_amount * value_usdt
+                    stake_amount, stake_value_usdt = _apply_notional_cap(
+                        stake_amount,
+                        stake_value_usdt,
+                        config,
+                    )
+                    if stake_amount <= 0 or stake_value_usdt <= 0:
+                        continue
+                    expected_end = _execute_triangular_cycle(
+                        cycle_path,
+                        actions,
+                        rows_by_pair,
+                        stake_amount,
+                        config,
+                    )
+                    if expected_end is None:
+                        continue
+                    signal_gross_edge = expected_end / stake_amount - 1.0
+                    signal_edge_bps = signal_gross_edge * 10_000
+                    signal_expected_pnl = stake_value_usdt * signal_gross_edge
+                    if (
+                        signal_expected_pnl < _min_signal_profit_usdt(config, stake_value_usdt)
+                        or signal_edge_bps < _min_signal_edge_bps(config)
+                    ):
+                        continue
+                    if best_signal is None or signal_expected_pnl > best_signal["expected_pnl"]:
+                        best_signal = {
+                            "cycle_path": cycle_path,
+                            "currency": cycle_start,
+                            "amount": stake_amount,
+                            "value_usdt": stake_value_usdt,
+                            "edge_bps": signal_edge_bps,
+                            "expected_pnl": signal_expected_pnl,
+                        }
+            if best_signal is None:
+                continue
+
+            if config.enforce_inventory:
+                balance_key = (exchange, best_signal["currency"])
+                if currency_balances.get(balance_key, 0.0) < best_signal["amount"]:
+                    inventory_skips += 1
+                    continue
+                currency_balances[balance_key] -= best_signal["amount"]
+
+            pending_trade = _PendingTriangularTrade(
+                seq=seq,
+                ts=t,
+                exec_ts=te,
+                exchange=exchange,
+                cycle=best_signal["cycle_path"],
+                reserved_currency=best_signal["currency"],
+                reserved_amount=best_signal["amount"],
+                signal_start_value_usdt=best_signal["value_usdt"],
+                signal_edge_bps=best_signal["edge_bps"],
+                signal_expected_pnl=best_signal["expected_pnl"],
+            )
+            heappush(pending, (te, seq, pending_trade))
+            seq += 1
+
+    while pending:
+        _, _, pending_trade = heappop(pending)
+        handle_pending(pending_trade)
+
+    pnl_at = pd.Series(0.0, index=all_ts)
+    for ts, pnl in pnl_by_exec_ts.items():
+        if ts in pnl_at.index:
+            pnl_at.loc[ts] += pnl
+    equity = start_capital + pnl_at.cumsum()
+    equity.index = pd.to_datetime(all_ts, unit="ms", utc=True)
+
+    return L2TriangularResult(
+        trades=sorted(trades, key=lambda x: (x.exec_ts, x.ts)),
+        equity_curve=equity,
+        grid_points=len(all_ts),
+        raw_cycles=raw_cycles,
+        executable_candidates=executable_candidates,
+        inventory_skips=inventory_skips,
+        start_capital_usdt=start_capital,
     )

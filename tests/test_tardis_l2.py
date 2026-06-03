@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 
 import run_tardis
-from src.tardis_backtest import L2Config, run_l2_backtest
-from src.tardis_data import load_grid
+from src.tardis_backtest import L2Config, run_l2_backtest, run_l2_triangular_backtest
+from src.tardis_data import load_grid, normalize_pair, tardis_pair_symbol
 
 
 def _book_df(exchange: str, asset: str, rows: list[tuple[int, float, float]]) -> pd.DataFrame:
@@ -19,6 +19,32 @@ def _book_df(exchange: str, asset: str, rows: list[tuple[int, float, float]]) ->
                 "bids[0].amount": 10.0,
                 "exchange": exchange,
                 "asset": asset,
+            }
+            for ts, ask, bid in rows
+        ]
+    )
+
+
+def _pair_book_df(
+    exchange: str,
+    base: str,
+    quote: str,
+    rows: list[tuple[int, float, float]],
+) -> pd.DataFrame:
+    pair = f"{base}{quote}"
+    return pd.DataFrame(
+        [
+            {
+                "ts": ts,
+                "asks[0].price": ask,
+                "asks[0].amount": 1_000.0,
+                "bids[0].price": bid,
+                "bids[0].amount": 1_000.0,
+                "exchange": exchange,
+                "asset": base if quote == "USDT" else pair,
+                "pair": pair,
+                "base": base,
+                "quote": quote,
             }
             for ts, ask, bid in rows
         ]
@@ -143,6 +169,31 @@ def test_l2_min_edge_filter_blocks_tiny_executable_trade():
     assert result.trades == []
 
 
+def test_l2_min_profit_pct_blocks_edges_below_percent_of_notional():
+    panels = {
+        ("cheap", "BTC"): _book_df("cheap", "BTC", [(0, 100.0, 99.0)]),
+        ("rich", "BTC"): _book_df("rich", "BTC", [(0, 101.0, 100.4)]),
+    }
+
+    result = run_l2_backtest(
+        panels,
+        L2Config(
+            fee=0.0,
+            max_notional_usdt=1_000.0,
+            min_profit_usdt=0.0,
+            min_profit_pct=0.5,
+            latency_ms=0,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=100,
+        ),
+    )
+
+    assert result.raw_crosses == 1
+    assert result.executable_candidates == 0
+    assert result.trades == []
+
+
 def test_l2_records_loss_when_signal_passes_but_execution_decays():
     panels = {
         ("cheap", "BTC"): _book_df(
@@ -203,6 +254,193 @@ def test_l2_spot_fee_reduces_bought_asset_then_quote_proceeds():
     assert trade.size == pytest.approx(0.999)
     assert trade.sell_proceeds == pytest.approx(0.999 * 110.0 * 0.999)
     assert trade.pnl == pytest.approx(trade.signal_expected_pnl)
+
+
+def test_l2_inventory_reservation_blocks_overlapping_orders():
+    panels = {
+        ("cheap", "BTC"): _book_df(
+            "cheap",
+            "BTC",
+            [(0, 100.0, 99.0), (100, 100.0, 99.0), (400, 100.0, 99.0)],
+        ),
+        ("rich", "BTC"): _book_df(
+            "rich",
+            "BTC",
+            [(0, 130.0, 120.0), (100, 130.0, 120.0), (400, 130.0, 120.0)],
+        ),
+    }
+
+    result = run_l2_backtest(
+        panels,
+        L2Config(
+            fee=0.0,
+            max_notional_usdt=2_000.0,
+            min_profit_usdt=1.0,
+            latency_ms=300,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=1000,
+            start_capital_usdt=10_000.0,
+            enforce_inventory=True,
+        ),
+    )
+
+    assert len(result.trades) == 1
+    assert result.inventory_skips >= 1
+    assert result.trades[0].ts == 0
+    assert result.trades[0].exec_ts == 400
+
+
+def test_l2_inventory_per_currency_usdt_supports_larger_notional():
+    panels = {
+        ("cheap", "BTC"): _book_df("cheap", "BTC", [(0, 100.0, 99.0)]),
+        ("rich", "BTC"): _book_df("rich", "BTC", [(0, 130.0, 120.0)]),
+    }
+
+    result = run_l2_backtest(
+        panels,
+        L2Config(
+            fee=0.0,
+            max_notional_usdt=2_000.0,
+            min_profit_usdt=1.0,
+            latency_ms=0,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=1000,
+            inventory_per_currency_usdt=5_000.0,
+            enforce_inventory=True,
+        ),
+    )
+
+    assert len(result.trades) == 1
+    assert result.inventory_skips == 0
+    assert result.start_capital_usdt == pytest.approx(20_000.0)
+    assert result.summary()["final_capital"] == pytest.approx(20_000.0 + result.trades[0].pnl)
+
+
+def test_l2_stake_fraction_sizes_from_available_inventory():
+    panels = {
+        ("cheap", "BTC"): _book_df("cheap", "BTC", [(0, 100.0, 99.0)]),
+        ("rich", "BTC"): _book_df("rich", "BTC", [(0, 130.0, 120.0)]),
+    }
+
+    result = run_l2_backtest(
+        panels,
+        L2Config(
+            fee=0.0,
+            stake_fraction=0.2,
+            min_profit_usdt=1.0,
+            latency_ms=0,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=1000,
+            inventory_per_currency_usdt=5_000.0,
+            enforce_inventory=True,
+        ),
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].buy_cost == pytest.approx(800.0)
+
+
+def test_l2_triangular_backtest_executes_profitable_three_leg_cycle():
+    panels = {
+        ("binance", "BTCUSDT"): _pair_book_df("binance", "BTC", "USDT", [(0, 100.0, 99.0)]),
+        ("binance", "ETHBTC"): _pair_book_df("binance", "ETH", "BTC", [(0, 0.5, 0.49)]),
+        ("binance", "ETHUSDT"): _pair_book_df("binance", "ETH", "USDT", [(0, 61.0, 60.0)]),
+    }
+
+    result = run_l2_triangular_backtest(
+        panels,
+        L2Config(
+            fee=0.0,
+            max_notional_usdt=100.0,
+            min_profit_usdt=1.0,
+            min_edge_bps=1.0,
+            latency_ms=0,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=1000,
+        ),
+    )
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.cycle == ["USDT", "BTC", "ETH", "USDT"]
+    assert trade.start_amount == pytest.approx(100.0)
+    assert trade.end_amount == pytest.approx(120.0)
+    assert trade.pnl == pytest.approx(20.0)
+    assert result.raw_cycles == 1
+
+
+def test_l2_triangular_backtest_can_start_from_non_usdt_inventory():
+    panels = {
+        ("binance", "BTCUSDT"): _pair_book_df("binance", "BTC", "USDT", [(0, 100.0, 99.0)]),
+        ("binance", "ETHBTC"): _pair_book_df("binance", "ETH", "BTC", [(0, 0.5, 0.49)]),
+        ("binance", "ETHUSDT"): _pair_book_df("binance", "ETH", "USDT", [(0, 61.0, 60.0)]),
+    }
+
+    result = run_l2_triangular_backtest(
+        panels,
+        L2Config(
+            fee=0.0,
+            max_notional_usdt=100.0,
+            min_profit_usdt=1.0,
+            latency_ms=0,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=1000,
+        ),
+        start_currency="ETH",
+    )
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.start_currency == "ETH"
+    assert trade.cycle == ["ETH", "USDT", "BTC", "ETH"]
+    assert trade.start_value_usdt == pytest.approx(100.0)
+    assert trade.pnl > 0
+
+
+def test_l2_triangular_backtest_does_not_lookahead_to_execution_book():
+    panels = {
+        ("binance", "BTCUSDT"): _pair_book_df(
+            "binance",
+            "BTC",
+            "USDT",
+            [(0, 100.0, 99.0), (100, 100.0, 99.0)],
+        ),
+        ("binance", "ETHBTC"): _pair_book_df(
+            "binance",
+            "ETH",
+            "BTC",
+            [(0, 0.5, 0.49), (100, 0.5, 0.49)],
+        ),
+        ("binance", "ETHUSDT"): _pair_book_df(
+            "binance",
+            "ETH",
+            "USDT",
+            [(0, 51.0, 49.0), (100, 61.0, 60.0)],
+        ),
+    }
+
+    result = run_l2_triangular_backtest(
+        panels,
+        L2Config(
+            fee=0.0,
+            max_notional_usdt=100.0,
+            min_profit_usdt=1.0,
+            min_edge_bps=1.0,
+            latency_ms=100,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=1000,
+        ),
+    )
+
+    assert result.trades == []
+    assert result.raw_cycles == 0
+    assert result.executable_candidates == 0
 
 
 def test_load_grid_normalizes_legacy_sec_cache(tmp_path: Path):
@@ -269,3 +507,19 @@ def test_build_scenarios_sweeps_fee_percent_and_latency_grid():
     assert [s[3].fee for s in scenarios] == pytest.approx(
         [0.0, 0.0, 0.0001, 0.0001, 0.001, 0.001]
     )
+
+
+def test_pair_helpers_support_triangle_symbols():
+    assert normalize_pair("ETH/BTC") == ("ETH", "BTC")
+    assert normalize_pair("ETH-BTC") == ("ETH", "BTC")
+    assert normalize_pair("SOL") == ("SOL", "USDT")
+    assert tardis_pair_symbol("okx", "ETH", "BTC") == "ETH-BTC"
+    assert tardis_pair_symbol("binance", "ETH", "BTC") == "ETHBTC"
+    assert run_tardis.triangle_pairs_from_assets(["BTC", "ETH", "SOL"]) == [
+        ("BTC", "USDT"),
+        ("ETH", "USDT"),
+        ("SOL", "USDT"),
+        ("ETH", "BTC"),
+        ("SOL", "BTC"),
+        ("SOL", "ETH"),
+    ]
