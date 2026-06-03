@@ -45,7 +45,7 @@ def main() -> None:
     ap.add_argument("--exchanges", nargs="+", default=["binance", "bybit", "okx"])
     ap.add_argument("--notional", type=float, default=2_000.0)
     ap.add_argument("--min-profit-usdt", type=float, default=0.01,
-                    help="Minimum net PnL required to record a trade")
+                    help="Minimum expected PnL at signal time required to send a trade")
     ap.add_argument("--min-edge-bps", type=float, default=0.0,
                     help="Minimum net edge after fees, in basis points")
     ap.add_argument("--depth", type=int, default=5)
@@ -148,7 +148,9 @@ def main() -> None:
         "max_quote_age_ms": args.max_quote_age_ms,
         "model": "pre-funded inventory, slippage via order-book walking, "
                  "latency-shifted execution (decide at t, fill on first grid point "
-                 "at/after t+Δ), stale forward-filled books capped by max_quote_age_ms",
+                 "at/after t+Δ), spot buy fee deducted from base asset, spot sell fee "
+                 "deducted from quote proceeds, stale forward-filled books capped by "
+                 "max_quote_age_ms",
         "scenarios": summaries,
     }
     with open(results / "tardis_l2_report.json", "w", encoding="utf-8") as f:

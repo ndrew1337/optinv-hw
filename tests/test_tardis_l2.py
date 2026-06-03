@@ -178,6 +178,33 @@ def test_l2_records_loss_when_signal_passes_but_execution_decays():
     assert result.trades[0].pnl < 0
 
 
+def test_l2_spot_fee_reduces_bought_asset_then_quote_proceeds():
+    panels = {
+        ("cheap", "BTC"): _book_df("cheap", "BTC", [(0, 100.0, 99.0)]),
+        ("rich", "BTC"): _book_df("rich", "BTC", [(0, 111.0, 110.0)]),
+    }
+
+    result = run_l2_backtest(
+        panels,
+        L2Config(
+            fee=0.001,
+            max_notional_usdt=100.0,
+            min_profit_usdt=0.0,
+            latency_ms=0,
+            grid_ms=100,
+            depth=1,
+            max_quote_age_ms=100,
+        ),
+    )
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.buy_cost == pytest.approx(100.0)
+    assert trade.size == pytest.approx(0.999)
+    assert trade.sell_proceeds == pytest.approx(0.999 * 110.0 * 0.999)
+    assert trade.pnl == pytest.approx(trade.signal_expected_pnl)
+
+
 def test_load_grid_normalizes_legacy_sec_cache(tmp_path: Path):
     raw_dir = tmp_path / "raw"
     grid_dir = tmp_path / "grid"

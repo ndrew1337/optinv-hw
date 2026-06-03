@@ -10,6 +10,8 @@ Differences from the OHLC backtest (src/cross_exchange.py):
 * Pre-funded INVENTORY model: assets sit on both venues, so there is no
   coin-transfer inside the trade (the realistic way cross-exchange arb is run);
   rebalancing is an offline cost, not part of per-trade PnL.
+* Spot fee convention: the buy-side fee reduces the asset received; the
+  sell-side fee reduces the quote proceeds.
 
 This is the "tested on real L2 data" demonstration, on one free day
 (first-of-month Tardis sample).
@@ -45,7 +47,7 @@ class L2Trade:
     asset: str
     buy_ex: str
     sell_ex: str
-    size: float
+    size: float                      # net asset sold after buy-side fee
     buy_cost: float
     sell_proceeds: float
     pnl: float
@@ -225,24 +227,28 @@ def run_l2_backtest(
             if exec_ask is None or not np.isfinite(exec_ask) or exec_ask <= 0:
                 continue
 
-            target_qty = config.max_notional_usdt / exec_ask
-            size = min(
-                target_qty,
+            fee_factor = 1.0 - config.fee
+            if fee_factor <= 0:
+                continue
+            target_gross_qty = config.max_notional_usdt / exec_ask
+            gross_buy_size = min(
+                target_gross_qty,
                 _depth_sum(buy_row, "asks", depth),
-                _depth_sum(sell_row, "bids", depth),
+                _depth_sum(sell_row, "bids", depth) / fee_factor,
             )
-            if size <= 0:
+            if gross_buy_size <= 0:
                 continue
 
-            f_buy, _ = _walk_buy(buy_row, size, depth)
+            f_buy, _ = _walk_buy(buy_row, gross_buy_size, depth)
+            size = f_buy * fee_factor
             f_sell, _ = _walk_sell(sell_row, size, depth)
-            size = min(f_buy, f_sell)
+            size = min(size, f_sell)
             if size <= 0:
                 continue
-            _, buy_cost = _walk_buy(buy_row, size, depth)
+            gross_buy_size = size / fee_factor
+            _, buy_cost = _walk_buy(buy_row, gross_buy_size, depth)
             _, sell_proceeds = _walk_sell(sell_row, size, depth)
 
-            buy_cost *= (1.0 + config.fee)
             sell_proceeds *= (1.0 - config.fee)
             pnl = sell_proceeds - buy_cost
 
