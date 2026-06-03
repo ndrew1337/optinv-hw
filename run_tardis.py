@@ -301,10 +301,16 @@ def main() -> None:
 
     pair_labels = [f"{base}/{quote}" for base, quote in triangle_pairs]
     combined_summaries = []
+    triangle_path_cache = {}
     fig, ax = plt.subplots(figsize=(10, 4))
     for key, title, fee_pct, cfg in scenarios:
         print(f"\nRunning combined direct+triangles: {title}")
-        res = run_l2_combined_backtest(panels, pair_panels, cfg)
+        res = run_l2_combined_backtest(
+            panels,
+            pair_panels,
+            cfg,
+            triangle_path_cache=triangle_path_cache,
+        )
         s = res.summary()
         s["scenario"] = title
         s["fee_pct"] = fee_pct
@@ -369,7 +375,8 @@ def main() -> None:
                  "cross-exchange direct candidates and same-exchange length-3 "
                  "triangular candidates compete for one shared (exchange, currency) "
                  "inventory; the highest expected-PnL signal is reserved and executed "
-                 "on the first grid point at/after t+Δ",
+                 "on the first grid point at/after t+Δ; gross triangle path discovery "
+                 "is cached across fee/latency scenarios",
         "scenarios": combined_summaries,
     }
     dated_report_path = results / f"tardis_combined_report_{date_tag}{output_tag}.json"

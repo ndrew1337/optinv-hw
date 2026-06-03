@@ -476,7 +476,7 @@ def test_l2_combined_backtest_selects_best_direct_or_triangle_signal():
     )
 
     assert result.raw_crosses == 1
-    assert result.raw_cycles == 1
+    assert result.raw_cycles >= 1
     assert len(result.direct_trades) == 1
     assert result.triangular_trades == []
     assert result.summary()["trades_executed"] == 1

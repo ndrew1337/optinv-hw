@@ -683,20 +683,64 @@ def _build_l2_exchange_graph(
     t: int,
 ) -> Tuple[ExchangeGraph, Dict[Tuple[str, str], _PairAction]]:
     graph = ExchangeGraph(fee=config.fee)
+    actions = _build_l2_actions(rows_by_pair, pair_defs, config.max_quote_age_ms, t)
+    for (u, v), action in actions.items():
+        row = rows_by_pair[action.pair]
+        base, quote = pair_defs[action.pair]
+        if action.side == "buy":
+            ask = row.get("asks[0].price")
+            if ask is not None and np.isfinite(ask) and ask > 0:
+                graph.add_directed(quote, base, 1.0 / ask)
+        else:
+            bid = row.get("bids[0].price")
+            if bid is not None and np.isfinite(bid) and bid > 0:
+                graph.add_directed(base, quote, bid)
+    return graph, actions
+
+
+def _build_l2_actions(
+    rows_by_pair: Dict[str, dict],
+    pair_defs: Dict[str, Tuple[str, str]],
+    max_age_ms: int,
+    t: int,
+) -> Dict[Tuple[str, str], _PairAction]:
     actions: Dict[Tuple[str, str], _PairAction] = {}
     for pair, row in rows_by_pair.items():
-        if row is None or not _is_fresh(row, t, config.max_quote_age_ms):
+        if row is None or not _is_fresh(row, t, max_age_ms):
             continue
         base, quote = pair_defs[pair]
         ask = row.get("asks[0].price")
         bid = row.get("bids[0].price")
         if ask is not None and np.isfinite(ask) and ask > 0:
-            graph.add_directed(quote, base, 1.0 / ask)
             actions[(quote, base)] = _PairAction(pair=pair, side="buy")
         if bid is not None and np.isfinite(bid) and bid > 0:
-            graph.add_directed(base, quote, bid)
             actions[(base, quote)] = _PairAction(pair=pair, side="sell")
-    return graph, actions
+    return actions
+
+
+def _triangle_cycle_paths_from_actions(
+    actions: Dict[Tuple[str, str], _PairAction],
+) -> List[List[str]]:
+    currencies = sorted({c for edge in actions for c in edge})
+    out: List[List[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for a in currencies:
+        for b in currencies:
+            if b == a or (a, b) not in actions:
+                continue
+            for c in currencies:
+                if c == a or c == b:
+                    continue
+                if (b, c) not in actions or (c, a) not in actions:
+                    continue
+                nodes = [a, b, c]
+                rotations = [tuple(nodes[i:] + nodes[:i]) for i in range(len(nodes))]
+                key = min(rotations)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append([a, b, c, a])
+    return out
 
 
 def _rotate_cycle_to(cycle: ArbitrageCycle, start_currency: str) -> List[str]:
@@ -1260,6 +1304,7 @@ def run_l2_combined_backtest(
     panels: Dict[Tuple[str, str], pd.DataFrame],
     pair_panels: Dict[Tuple[str, str], pd.DataFrame],
     config: L2Config,
+    triangle_path_cache: Dict[Tuple[str, int, int], List[List[str]]] | None = None,
 ) -> L2CombinedResult:
     """Unified direct + same-exchange triangle L2 strategy.
 
@@ -1441,18 +1486,25 @@ def run_l2_combined_backtest(
             te = view.tss[te_idx]
 
             rows_by_pair = _rows_at(view, t)
-            graph, actions = _build_l2_exchange_graph(rows_by_pair, pair_defs, config, t)
-            seen_cycles: set[tuple[str, ...]] = set()
-            for signal_cycle in enumerate_triangles(graph):
-                if signal_cycle.length != 3:
-                    continue
-                cycle_key = _canonical_cycle_key(signal_cycle)
-                if cycle_key in seen_cycles:
-                    continue
-                seen_cycles.add(cycle_key)
+            actions = _build_l2_actions(
+                rows_by_pair,
+                pair_defs,
+                config.max_quote_age_ms,
+                t,
+            )
+            cache_key = (exchange, t, config.max_quote_age_ms)
+            if triangle_path_cache is not None and cache_key in triangle_path_cache:
+                cycle_paths = triangle_path_cache[cache_key]
+            else:
+                cycle_paths = _triangle_cycle_paths_from_actions(actions)
+                if triangle_path_cache is not None and cycle_paths:
+                    triangle_path_cache[cache_key] = cycle_paths
+            for cycle_path_raw in cycle_paths:
                 raw_cycles += 1
-                for cycle_start in signal_cycle.currencies[:-1]:
-                    cycle_path = _rotate_cycle_to(signal_cycle, cycle_start)
+                for cycle_start in cycle_path_raw[:-1]:
+                    nodes = cycle_path_raw[:-1]
+                    start_idx = nodes.index(cycle_start)
+                    cycle_path = nodes[start_idx:] + nodes[:start_idx] + [cycle_start]
                     value_usdt = _currency_value_usdt(cycle_start, rows_by_pair, pair_defs)
                     if value_usdt is None or value_usdt <= 0:
                         continue
