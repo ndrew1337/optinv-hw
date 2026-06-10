@@ -19,6 +19,7 @@ This is the "tested on real L2 data" demonstration, on one free day
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_left
 from dataclasses import dataclass, field
 from heapq import heappop, heappush
@@ -27,8 +28,57 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
-from .bellman_ford import ArbitrageCycle, enumerate_triangles
+from .bellman_ford import (
+    ArbitrageCycle,
+    bounded_bellman_ford_cycles,
+    enumerate_cycles,
+    enumerate_triangles,
+)
 from .graph import ExchangeGraph
+
+_isfinite = math.isfinite  # local alias: faster than np.isfinite on python scalars
+
+# ---------------------------------------------------------------------------
+# Order-book storage: each aligned book is ONE contiguous numpy float matrix
+# (rows = grid points, columns = a fixed flat layout) instead of a dict-of-dicts.
+# This cuts memory ~4x and speeds access. A "row" is a 1D numpy view; columns:
+#   col 0          = source_ts (ms of the last real update; NaN if none yet)
+#   col 1+4*i      = asks[i].price     col 2+4*i = asks[i].amount
+#   col 3+4*i      = bids[i].price     col 4+4*i = bids[i].amount
+# Missing values are NaN (so `v == v` is False).
+# ---------------------------------------------------------------------------
+_COL_SRC = 0
+
+
+def _ask_price_col(i: int) -> int:
+    return 1 + 4 * i
+
+
+def _book_columns(depth: int) -> List[str]:
+    """DataFrame columns, in the exact flat order the matrix expects."""
+    cols = ["source_ts"]
+    for i in range(depth):
+        cols += [f"asks[{i}].price", f"asks[{i}].amount",
+                 f"bids[{i}].price", f"bids[{i}].amount"]
+    return cols
+
+
+class _Book:
+    """Aligned order book for one (venue/pair): a float matrix + ts->row index.
+
+    `.get(t)` returns the 1D numpy row at timestamp t (a cheap view), or None —
+    same interface the old dict-of-dicts exposed, so call sites stay unchanged.
+    """
+
+    __slots__ = ("mat", "pos")
+
+    def __init__(self, mat, pos):
+        self.mat = mat
+        self.pos = pos  # dict: ts(ms) -> row index
+
+    def get(self, t):
+        i = self.pos.get(t)
+        return None if i is None else self.mat[i]
 
 
 @dataclass
@@ -46,6 +96,8 @@ class L2Config:
     inventory_per_currency_usdt: float | None = None
     max_quote_age_ms: int = 250  # cap stale forward-filled books
     enforce_inventory: bool = True
+    max_cycle_len: int = 3       # max edges in a same-exchange arbitrage cycle (K)
+    cycle_engine: str = "enumerate"  # "enumerate" (DFS, cached) | "bf" (length-bounded Bellman-Ford)
 
 
 @dataclass
@@ -252,15 +304,20 @@ def _canonical_cycle_key(cycle: ArbitrageCycle) -> tuple[str, ...]:
     return min(rotations)
 
 
-def _walk_buy(row: dict, size: float, depth: int) -> Tuple[float, float]:
+def _avail_levels(row, depth: int) -> int:
+    n = (len(row) - 1) // 4
+    return depth if depth <= n else n
+
+
+def _walk_buy(row, size: float, depth: int) -> Tuple[float, float]:
     """Buy up to `size` asset units by consuming ask levels. Returns (filled, cost)."""
     remaining, cost = size, 0.0
-    for i in range(depth):
-        p = row.get(f"asks[{i}].price")
-        a = row.get(f"asks[{i}].amount")
-        if p is None or a is None or not np.isfinite(p) or not np.isfinite(a) or a <= 0:
+    for i in range(_avail_levels(row, depth)):
+        p = row[1 + 4 * i]
+        a = row[2 + 4 * i]
+        if p != p or a != a or a <= 0:  # NaN check via x != x
             continue
-        take = min(remaining, a)
+        take = remaining if remaining < a else a
         cost += take * p
         remaining -= take
         if remaining <= 1e-15:
@@ -268,15 +325,15 @@ def _walk_buy(row: dict, size: float, depth: int) -> Tuple[float, float]:
     return size - remaining, cost
 
 
-def _walk_sell(row: dict, size: float, depth: int) -> Tuple[float, float]:
+def _walk_sell(row, size: float, depth: int) -> Tuple[float, float]:
     """Sell up to `size` asset units into bid levels. Returns (filled, proceeds)."""
     remaining, proceeds = size, 0.0
-    for i in range(depth):
-        p = row.get(f"bids[{i}].price")
-        a = row.get(f"bids[{i}].amount")
-        if p is None or a is None or not np.isfinite(p) or not np.isfinite(a) or a <= 0:
+    for i in range(_avail_levels(row, depth)):
+        p = row[3 + 4 * i]
+        a = row[4 + 4 * i]
+        if p != p or a != a or a <= 0:
             continue
-        take = min(remaining, a)
+        take = remaining if remaining < a else a
         proceeds += take * p
         remaining -= take
         if remaining <= 1e-15:
@@ -284,11 +341,12 @@ def _walk_sell(row: dict, size: float, depth: int) -> Tuple[float, float]:
     return size - remaining, proceeds
 
 
-def _depth_sum(row: dict, side: str, depth: int) -> float:
+def _depth_sum(row, side: str, depth: int) -> float:
+    off = 2 if side == "asks" else 4  # ask amount = 2+4i, bid amount = 4+4i
     s = 0.0
-    for i in range(depth):
-        a = row.get(f"{side}[{i}].amount")
-        if a is not None and np.isfinite(a) and a > 0:
+    for i in range(_avail_levels(row, depth)):
+        a = row[off + 4 * i]
+        if a == a and a > 0:
             s += a
     return s
 
@@ -308,20 +366,31 @@ def _align_asset(
         return venues, [], {}
     tss = sorted(set().union(*[set(panels[(ex, asset)]["ts"]) for ex in venues]))
     idx = pd.Index(tss, name="ts")
-    aligned: Dict[str, dict] = {}
+    pos = {int(t): i for i, t in enumerate(tss)}  # shared (read-only) across venues
+    aligned: Dict[str, _Book] = {}
     for ex in venues:
         df = panels[(ex, asset)].copy()
         df["source_ts"] = df["ts"]
         df = df.set_index("ts").reindex(idx).ffill()
-        aligned[ex] = df.to_dict("index")
+        mat = df[_book_columns(_depth_of_df(df))].to_numpy(dtype=float)
+        aligned[ex] = _Book(mat, pos)
     return venues, tss, aligned
 
 
-def _is_fresh(row: dict, t: int, max_age_ms: int) -> bool:
-    source_ts = row.get("source_ts")
-    if source_ts is None or not np.isfinite(source_ts):
+def _is_fresh(row, t: int, max_age_ms: int) -> bool:
+    if row is None:
         return False
-    return 0 <= t - int(source_ts) <= max_age_ms
+    src = row[_COL_SRC]
+    if src != src:  # NaN
+        return False
+    return 0 <= t - int(src) <= max_age_ms
+
+
+def _depth_of_df(df) -> int:
+    d = 0
+    while f"asks[{d}].price" in df.columns:
+        d += 1
+    return d
 
 
 @dataclass(frozen=True)
@@ -398,8 +467,8 @@ def _initial_mid(aligned: Dict[str, dict], tss: List[int], venue: str, max_age_m
         row = aligned[venue].get(t)
         if row is None or not _is_fresh(row, t, max_age_ms):
             continue
-        ask = row.get("asks[0].price")
-        bid = row.get("bids[0].price")
+        ask = row[1]
+        bid = row[3]
         if (
             ask is not None
             and bid is not None
@@ -467,7 +536,7 @@ def _execute_pending_trade(
     if not _is_fresh(sell_row, pending.exec_ts, config.max_quote_age_ms):
         return None
 
-    exec_ask = buy_row.get("asks[0].price")
+    exec_ask = buy_row[1]
     if exec_ask is None or not np.isfinite(exec_ask) or exec_ask <= 0:
         return None
 
@@ -557,7 +626,7 @@ def _execute_pending_direct_currency(
     if not _is_fresh(sell_row, pending.exec_ts, config.max_quote_age_ms):
         return None
 
-    exec_ask = buy_row.get("asks[0].price")
+    exec_ask = buy_row[1]
     if exec_ask is None or not np.isfinite(exec_ask) or exec_ask <= 0:
         return None
 
@@ -618,15 +687,15 @@ def _execute_pending_direct_currency(
     )
 
 
-def _walk_buy_by_quote(row: dict, quote_amount: float, depth: int) -> Tuple[float, float]:
+def _walk_buy_by_quote(row, quote_amount: float, depth: int) -> Tuple[float, float]:
     """Spend quote into asks. Returns (gross_base_received_before_fee, quote_spent)."""
     remaining, base_received = quote_amount, 0.0
-    for i in range(depth):
-        p = row.get(f"asks[{i}].price")
-        a = row.get(f"asks[{i}].amount")
-        if p is None or a is None or not np.isfinite(p) or not np.isfinite(a) or p <= 0 or a <= 0:
+    for i in range(_avail_levels(row, depth)):
+        p = row[1 + 4 * i]
+        a = row[2 + 4 * i]
+        if p != p or a != a or p <= 0 or a <= 0:
             continue
-        spend = min(remaining, a * p)
+        spend = remaining if remaining < a * p else a * p
         base_received += spend / p
         remaining -= spend
         if remaining <= 1e-12:
@@ -661,12 +730,14 @@ def _align_exchange_pairs(
     if not tss:
         return None
     idx = pd.Index(tss, name="ts")
-    aligned: Dict[str, dict] = {}
+    pos = {int(t): i for i, t in enumerate(tss)}
+    aligned: Dict[str, _Book] = {}
     for pair in pairs:
         df = pair_panels[(exchange, pair)].copy()
         df["source_ts"] = df["ts"]
         df = df.set_index("ts").reindex(idx).ffill()
-        aligned[pair] = df.to_dict("index")
+        mat = df[_book_columns(_depth_of_df(df))].to_numpy(dtype=float)
+        aligned[pair] = _Book(mat, pos)
     return _ExchangePairView(
         exchange=exchange,
         pairs=pairs,
@@ -688,11 +759,11 @@ def _build_l2_exchange_graph(
         row = rows_by_pair[action.pair]
         base, quote = pair_defs[action.pair]
         if action.side == "buy":
-            ask = row.get("asks[0].price")
+            ask = row[1]
             if ask is not None and np.isfinite(ask) and ask > 0:
                 graph.add_directed(quote, base, 1.0 / ask)
         else:
-            bid = row.get("bids[0].price")
+            bid = row[3]
             if bid is not None and np.isfinite(bid) and bid > 0:
                 graph.add_directed(base, quote, bid)
     return graph, actions
@@ -709,8 +780,8 @@ def _build_l2_actions(
         if row is None or not _is_fresh(row, t, max_age_ms):
             continue
         base, quote = pair_defs[pair]
-        ask = row.get("asks[0].price")
-        bid = row.get("bids[0].price")
+        ask = row[1]
+        bid = row[3]
         if ask is not None and np.isfinite(ask) and ask > 0:
             actions[(quote, base)] = _PairAction(pair=pair, side="buy")
         if bid is not None and np.isfinite(bid) and bid > 0:
@@ -721,25 +792,40 @@ def _build_l2_actions(
 def _triangle_cycle_paths_from_actions(
     actions: Dict[Tuple[str, str], _PairAction],
 ) -> List[List[str]]:
-    currencies = sorted({c for edge in actions for c in edge})
+    return _cycle_paths_from_actions(actions, max_len=3, min_len=3)
+
+
+def _cycle_paths_from_actions(
+    actions: Dict[Tuple[str, str], _PairAction],
+    max_len: int = 3,
+    min_len: int = 3,
+) -> List[List[str]]:
+    """All simple structural cycles (currency loops) with edge-length in
+    [min_len, max_len], given which directed conversions are available.
+
+    Topology only (no prices) -> can be cached per available-edge set and reused
+    across ticks. Profitability is decided later by walking the book.
+    """
+    adj: Dict[str, List[str]] = {}
+    for (u, v) in actions:
+        adj.setdefault(u, []).append(v)
     out: List[List[str]] = []
     seen: set[tuple[str, ...]] = set()
-    for a in currencies:
-        for b in currencies:
-            if b == a or (a, b) not in actions:
-                continue
-            for c in currencies:
-                if c == a or c == b:
-                    continue
-                if (b, c) not in actions or (c, a) not in actions:
-                    continue
-                nodes = [a, b, c]
-                rotations = [tuple(nodes[i:] + nodes[:i]) for i in range(len(nodes))]
-                key = min(rotations)
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append([a, b, c, a])
+    for start in sorted(adj):
+        stack = [([start], {start})]
+        while stack:
+            path, visited = stack.pop()
+            node = path[-1]
+            for v in adj.get(node, ()):  # noqa: B007
+                if v == start:
+                    clen = len(path)  # closing edge makes a cycle of `len(path)` edges
+                    if min_len <= clen <= max_len:
+                        key = min(tuple(path[i:] + path[:i]) for i in range(len(path)))
+                        if key not in seen:
+                            seen.add(key)
+                            out.append(path + [start])
+                elif v not in visited and len(path) < max_len:
+                    stack.append((path + [v], visited | {v}))
     return out
 
 
@@ -774,8 +860,8 @@ def _currency_value_usdt(
         row = rows_by_pair.get(pair)
         if row is None:
             continue
-        ask = row.get("asks[0].price")
-        bid = row.get("bids[0].price")
+        ask = row[1]
+        bid = row[3]
         if ask is None or bid is None or not np.isfinite(ask) or not np.isfinite(bid):
             continue
         if ask <= 0 or bid <= 0:
@@ -898,6 +984,40 @@ def _execute_triangular_cycle(
     return current_amount if cycle[0] == cycle[-1] else None
 
 
+def _cycle_topbook_mult(
+    cycle: List[str],
+    actions: Dict[Tuple[str, str], _PairAction],
+    rows_by_pair: Dict[str, dict],
+    fee_factor: float,
+) -> float | None:
+    """UPPER bound of a cycle's end/start ratio using only top-of-book (level 0).
+
+    Deeper book levels can only be worse, so the realized depth-walked result is
+    always <= this. Used to pre-screen out cycles that cannot meet the edge gate,
+    without changing which cycles actually trade. Returns None if a leg has no
+    level-0 price (then the caller must fall back to the full walk, not skip).
+    """
+    m = 1.0
+    for u, v in zip(cycle, cycle[1:]):
+        action = actions.get((u, v))
+        if action is None:
+            return None
+        row = rows_by_pair.get(action.pair)
+        if row is None:
+            return None
+        if action.side == "buy":
+            ask = row[1]
+            if ask != ask or ask <= 0:
+                return None
+            m *= (1.0 / ask) * fee_factor
+        else:
+            bid = row[3]
+            if bid != bid or bid <= 0:
+                return None
+            m *= bid * fee_factor
+    return m
+
+
 def _rows_at(view: _ExchangePairView, t: int) -> Dict[str, dict]:
     return {pair: view.aligned[pair].get(t) for pair in view.pairs}
 
@@ -940,21 +1060,31 @@ def _execute_pending_triangle(
     )
 
 
-def run_l2_backtest(
-    panels: Dict[Tuple[str, str], pd.DataFrame],
-    config: L2Config,
-) -> L2Result:
+def prepare_direct_views(panels: Dict[Tuple[str, str], pd.DataFrame]):
+    """Build aligned asset views + the union time grid ONCE.
+
+    Alignment (ffill + to_dict) is independent of fee/latency, so this can be
+    built once and reused across every scenario instead of per call.
+    """
     assets = sorted({a for (_, a) in panels})
     asset_views: Dict[str, _AssetView] = {}
     for asset in assets:
         venues, tss, aligned = _align_asset(panels, asset)
         if len(venues) >= 2 and tss:
             asset_views[asset] = _AssetView(
-                venues=venues,
-                tss=tss,
-                tss_set=set(tss),
-                aligned=aligned,
+                venues=venues, tss=tss, tss_set=set(tss), aligned=aligned,
             )
+    all_ts = sorted(set().union(*[set(df["ts"]) for df in panels.values()])) if panels else []
+    return asset_views, all_ts
+
+
+def run_l2_backtest(
+    panels: Dict[Tuple[str, str], pd.DataFrame],
+    config: L2Config,
+    prepared=None,
+    progress_label: str | None = None,
+) -> L2Result:
+    asset_views, all_ts = prepare_direct_views(panels) if prepared is None else prepared
 
     trades: List[L2Trade] = []
     raw_crosses = 0
@@ -964,9 +1094,12 @@ def run_l2_backtest(
     seq = 0
     quote_balances, asset_balances, start_capital = _initial_balances(asset_views, config)
     pnl_by_exec_ts: Dict[int, float] = {}
-
-    all_ts = sorted(set().union(*[set(df["ts"]) for df in panels.values()]))
-    for t in all_ts:
+    _n = len(all_ts)
+    _step = max(1, _n // 20)
+    for _i, t in enumerate(all_ts):
+        if progress_label and (_i % _step == 0 or _i == _n - 1):
+            print(f"[{progress_label}] {100 * (_i + 1) // _n}%  {_i + 1}/{_n}  "
+                  f"{len(trades)} trades", flush=True)
         while pending and pending[0][0] <= t:
             _, _, pending_trade = heappop(pending)
             view = asset_views[pending_trade.asset]
@@ -1004,8 +1137,8 @@ def run_l2_backtest(
                 row = view.aligned[ex].get(t)
                 if row is None or not _is_fresh(row, t, config.max_quote_age_ms):
                     continue
-                ask = row.get("asks[0].price")
-                bid = row.get("bids[0].price")
+                ask = row[1]
+                bid = row[3]
                 if ask is not None and np.isfinite(ask) and ask < best_ask:
                     best_ask, best_ask_ex = ask, ex
                 if bid is not None and np.isfinite(bid) and bid > best_bid:
@@ -1204,8 +1337,13 @@ def run_l2_triangular_backtest(
             graph, actions = _build_l2_exchange_graph(rows_by_pair, pair_defs, config, t)
             best_signal = None
             seen_cycles: set[tuple[str, ...]] = set()
-            for signal_cycle in enumerate_triangles(graph):
-                if signal_cycle.length != 3:
+            engine_cycles = (
+                bounded_bellman_ford_cycles(graph, max_len=config.max_cycle_len, min_len=3)
+                if config.cycle_engine == "bf"
+                else enumerate_cycles(graph, max_len=config.max_cycle_len, min_len=3)
+            )
+            for signal_cycle in engine_cycles:
+                if signal_cycle.length < 3 or signal_cycle.length > config.max_cycle_len:
                     continue
                 cycle_key = _canonical_cycle_key(signal_cycle)
                 if cycle_key in seen_cycles:
@@ -1300,11 +1438,41 @@ def run_l2_triangular_backtest(
     )
 
 
+def prepare_combined_views(
+    panels: Dict[Tuple[str, str], pd.DataFrame],
+    pair_panels: Dict[Tuple[str, str], pd.DataFrame],
+):
+    """Build aligned asset+exchange views, pair defs and union grid ONCE.
+
+    Independent of fee/latency -> build once and reuse across all scenarios
+    (alignment + to_dict is the dominant setup cost, ~tens of seconds).
+    """
+    assets = sorted({a for (_, a) in panels})
+    asset_views: Dict[str, _AssetView] = {}
+    for asset in assets:
+        venues, tss, aligned = _align_asset(panels, asset)
+        if len(venues) >= 2 and tss:
+            asset_views[asset] = _AssetView(
+                venues=venues, tss=tss, tss_set=set(tss), aligned=aligned,
+            )
+    pair_defs = _pair_defs_from_panels(pair_panels)
+    exchange_views: Dict[str, _ExchangePairView] = {}
+    for exchange in sorted({ex for ex, _ in pair_panels}):
+        view = _align_exchange_pairs(pair_panels, exchange)
+        if view is not None:
+            exchange_views[exchange] = view
+    all_frames = list(panels.values()) + list(pair_panels.values())
+    all_ts = sorted(set().union(*[set(df["ts"]) for df in all_frames])) if all_frames else []
+    return asset_views, exchange_views, pair_defs, all_ts
+
+
 def run_l2_combined_backtest(
     panels: Dict[Tuple[str, str], pd.DataFrame],
     pair_panels: Dict[Tuple[str, str], pd.DataFrame],
     config: L2Config,
-    triangle_path_cache: Dict[Tuple[str, int, int], List[List[str]]] | None = None,
+    triangle_path_cache: dict | None = None,
+    prepared=None,
+    progress_label: str | None = None,
 ) -> L2CombinedResult:
     """Unified direct + same-exchange triangle L2 strategy.
 
@@ -1313,29 +1481,12 @@ def run_l2_combined_backtest(
     (exchange, currency) inventory. The best expected-PnL signal is reserved
     and later executed on the latency-shifted book.
     """
-    assets = sorted({a for (_, a) in panels})
-    asset_views: Dict[str, _AssetView] = {}
-    for asset in assets:
-        venues, tss, aligned = _align_asset(panels, asset)
-        if len(venues) >= 2 and tss:
-            asset_views[asset] = _AssetView(
-                venues=venues,
-                tss=tss,
-                tss_set=set(tss),
-                aligned=aligned,
-            )
-
-    pair_defs = _pair_defs_from_panels(pair_panels)
-    exchange_views: Dict[str, _ExchangePairView] = {}
-    for exchange in sorted({ex for ex, _ in pair_panels}):
-        view = _align_exchange_pairs(pair_panels, exchange)
-        if view is not None:
-            exchange_views[exchange] = view
-
-    all_frames = list(panels.values()) + list(pair_panels.values())
-    if not all_frames:
+    if prepared is None:
+        asset_views, exchange_views, pair_defs, all_ts = prepare_combined_views(panels, pair_panels)
+    else:
+        asset_views, exchange_views, pair_defs, all_ts = prepared
+    if not all_ts:
         return L2CombinedResult(start_capital_usdt=config.start_capital_usdt)
-    all_ts = sorted(set().union(*[set(df["ts"]) for df in all_frames]))
 
     currency_balances, start_capital = _initial_combined_balances(
         asset_views,
@@ -1352,6 +1503,10 @@ def run_l2_combined_backtest(
     executable_candidates = 0
     inventory_skips = 0
     seq = 0
+    # config-only constants, hoisted out of the per-tick / per-candidate loops
+    screen_fee_factor = 1.0 - config.fee
+    screen_min_edge_bps = _min_signal_edge_bps(config)
+    stake_frac = _stake_fraction(config)
 
     def handle_pending(kind: str, pending_trade: _PendingTrade | _PendingTriangularTrade) -> None:
         nonlocal executable_candidates
@@ -1393,7 +1548,12 @@ def run_l2_combined_backtest(
             return signal
         return best
 
-    for t in all_ts:
+    _n = len(all_ts)
+    _step = max(1, _n // 20)
+    for _i, t in enumerate(all_ts):
+        if progress_label and (_i % _step == 0 or _i == _n - 1):
+            print(f"[{progress_label}] {100 * (_i + 1) // _n}%  {_i + 1}/{_n}  "
+                  f"{len(direct_trades) + len(triangular_trades)} trades", flush=True)
         while pending and pending[0][0] <= t:
             _, _, kind, pending_trade = heappop(pending)
             handle_pending(kind, pending_trade)
@@ -1415,8 +1575,8 @@ def run_l2_combined_backtest(
                 row = view.aligned[ex].get(t)
                 if row is None or not _is_fresh(row, t, config.max_quote_age_ms):
                     continue
-                ask = row.get("asks[0].price")
-                bid = row.get("bids[0].price")
+                ask = row[1]
+                bid = row[3]
                 if ask is not None and np.isfinite(ask) and ask < best_ask:
                     best_ask, best_ask_ex = ask, ex
                 if bid is not None and np.isfinite(bid) and bid > best_bid:
@@ -1486,30 +1646,61 @@ def run_l2_combined_backtest(
             te = view.tss[te_idx]
 
             rows_by_pair = _rows_at(view, t)
+            cur_value: Dict[str, float | None] = {}  # currency->USDT value, memoized per tick
             actions = _build_l2_actions(
                 rows_by_pair,
                 pair_defs,
                 config.max_quote_age_ms,
                 t,
             )
-            cache_key = (exchange, t, config.max_quote_age_ms)
-            if triangle_path_cache is not None and cache_key in triangle_path_cache:
-                cycle_paths = triangle_path_cache[cache_key]
+            if config.cycle_engine == "bf":
+                # Length-bounded Bellman-Ford: best negative cycle <=K per source,
+                # ranked by top-of-book weight. Price-dependent -> recomputed each
+                # tick (no topology cache), O(V*K*E) — scalable to many currencies.
+                graph, _ = _build_l2_exchange_graph(rows_by_pair, pair_defs, config, t)
+                cycle_paths = [
+                    c.currencies
+                    for c in bounded_bellman_ford_cycles(
+                        graph, max_len=config.max_cycle_len, min_len=3
+                    )
+                ]
             else:
-                cycle_paths = _triangle_cycle_paths_from_actions(actions)
-                if triangle_path_cache is not None and cycle_paths:
-                    triangle_path_cache[cache_key] = cycle_paths
+                # Candidate cycle paths depend only on the available-edge TOPOLOGY,
+                # not on prices/time — cache by topology so each distinct topology is
+                # enumerated once and reused across ticks AND scenarios. Critical for
+                # keeping K>3 tractable.
+                topo_key = (exchange, frozenset(actions.keys()), config.max_cycle_len)
+                if triangle_path_cache is not None and topo_key in triangle_path_cache:
+                    cycle_paths = triangle_path_cache[topo_key]
+                else:
+                    cycle_paths = _cycle_paths_from_actions(
+                        actions, max_len=config.max_cycle_len, min_len=3
+                    )
+                    if triangle_path_cache is not None:
+                        triangle_path_cache[topo_key] = cycle_paths
             for cycle_path_raw in cycle_paths:
                 raw_cycles += 1
+                # Cheap top-of-book upper bound: if even the best case can't meet
+                # the edge gate, the depth-walked result can't either — skip the
+                # expensive per-start walk. (None => missing L0, fall through.)
+                ub_mult = _cycle_topbook_mult(
+                    cycle_path_raw, actions, rows_by_pair, screen_fee_factor
+                )
+                if ub_mult is not None and (ub_mult - 1.0) * 10_000.0 < screen_min_edge_bps:
+                    continue
                 for cycle_start in cycle_path_raw[:-1]:
                     nodes = cycle_path_raw[:-1]
                     start_idx = nodes.index(cycle_start)
                     cycle_path = nodes[start_idx:] + nodes[:start_idx] + [cycle_start]
-                    value_usdt = _currency_value_usdt(cycle_start, rows_by_pair, pair_defs)
+                    if cycle_start in cur_value:
+                        value_usdt = cur_value[cycle_start]
+                    else:
+                        value_usdt = _currency_value_usdt(cycle_start, rows_by_pair, pair_defs)
+                        cur_value[cycle_start] = value_usdt
                     if value_usdt is None or value_usdt <= 0:
                         continue
                     balance = currency_balances.get((exchange, cycle_start), 0.0)
-                    stake_amount = balance * _stake_fraction(config)
+                    stake_amount = balance * stake_frac
                     stake_value_usdt = stake_amount * value_usdt
                     stake_amount, stake_value_usdt = _apply_notional_cap(
                         stake_amount,

@@ -11,20 +11,36 @@ Data: free first-day-of-month sample from datasets.tardis.dev (no API key).
 
 from __future__ import annotations
 
+import os
+
+# Must be set BEFORE numpy/pandas import so BLAS doesn't spawn threads that make
+# fork() unsafe on macOS; and disable the ObjC fork-safety abort. This lets us
+# parallelize scenarios via fork + copy-on-write (shared read-only aligned books).
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-from src.tardis_backtest import L2Config, run_l2_backtest, run_l2_combined_backtest
+from src.tardis_backtest import (
+    L2Config,
+    prepare_combined_views,
+    prepare_direct_views,
+    run_l2_backtest,
+    run_l2_combined_backtest,
+)
 from src.tardis_data import load_l2_pair_panels, load_l2_panels, normalize_pair
 
 
 DEFAULT_FEES_PCT = [0.0, 0.01, 0.1]
-DEFAULT_LATENCIES_MS = [0, 100, 300, 500]
+DEFAULT_LATENCIES_MS = [0, 100, 300]
 
 TRADE_COLUMNS = [
     "signal_ts_ms", "exec_ts_ms", "asset", "buy_ex", "sell_ex", "size",
@@ -133,6 +149,69 @@ def configure_runtime(root: Path) -> None:
     mpl_config.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(mpl_config))
 
+    # Headless Agg backend so plotting never touches Cocoa (keeps fork() safe).
+    import matplotlib
+    matplotlib.use("Agg")
+
+
+# ---- parallel scenario execution (fork + copy-on-write shared books) ----
+_CTX: dict = {}  # set in the parent before forking; children inherit read-only
+
+
+def _combined_scenario_worker(task):
+    """Run one combined scenario reusing the parent's prepared books (shared via
+    fork COW). Writes this scenario's CSVs and returns its summary dict."""
+    key, cfg = task["key"], task["cfg"]
+    # panels/pair_panels unused when `prepared` is given -> pass None so the parent
+    # can free the source DataFrames before forking.
+    res = run_l2_combined_backtest(
+        None, None, cfg, triangle_path_cache={}, prepared=_CTX["prepared"],
+        progress_label=(task["title"] if _CTX.get("progress") else None),
+    )
+    results, output_tag = _CTX["results"], _CTX["output_tag"]
+    res.equity_curve.to_csv(
+        results / f"tardis_combined_equity_{key}{output_tag}.csv", header=["equity"],
+    )
+    write_trades_csv(
+        res.direct_trades, results / f"tardis_combined_direct_trades_{key}{output_tag}.csv",
+    )
+    write_triangular_trades_csv(
+        res.triangular_trades, results / f"tardis_combined_triangle_trades_{key}{output_tag}.csv",
+    )
+    s = res.summary()
+    s["scenario"] = task["title"]
+    s["fee_pct"] = task["fee_pct"]
+    s["fee_per_leg"] = cfg.fee
+    s["latency_ms"] = cfg.latency_ms
+    s["max_quote_age_ms"] = cfg.max_quote_age_ms
+    return {"key": key, "summary": s}
+
+
+def _direct_scenario_worker(task):
+    """Run one direct (cross-exchange) scenario reusing the parent's prepared books."""
+    key, cfg = task["key"], task["cfg"]
+    res = run_l2_backtest(None, cfg, prepared=_CTX["prepared"],
+                          progress_label=(task["title"] if _CTX.get("progress") else None))
+    results, output_tag = _CTX["results"], _CTX["output_tag"]
+    res.equity_curve.to_csv(
+        results / f"tardis_equity_{key}{output_tag}.csv", header=["equity"],
+    )
+    write_trades_csv(res.trades, results / f"tardis_trades_{key}{output_tag}.csv")
+    s = res.summary()
+    s["scenario"] = task["title"]
+    s["fee_pct"] = task["fee_pct"]
+    s["fee_per_leg"] = cfg.fee
+    s["latency_ms"] = cfg.latency_ms
+    s["max_quote_age_ms"] = cfg.max_quote_age_ms
+    return {"key": key, "summary": s}
+
+
+def _resolve_workers(requested: int, n_tasks: int) -> int:
+    cpu = os.cpu_count() or 2
+    if requested is None or requested <= 0:
+        return max(1, min(n_tasks, cpu - 2, 8))
+    return max(1, min(requested, n_tasks))
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -167,6 +246,18 @@ def main() -> None:
                     help="Execution latencies to sweep in milliseconds")
     ap.add_argument("--inventory-per-currency-usdt", type=float, default=5_000.0,
                     help="Initial USDT-equivalent balance for each currency on each exchange")
+    ap.add_argument("--max-cycle-len", type=int, default=3,
+                    help="Max edges K in a same-exchange arbitrage cycle (3=triangles; "
+                         "4+ searches longer Bellman-Ford cycles, needs the cross pairs)")
+    ap.add_argument("--cycle-engine", choices=["enumerate", "bf"], default="enumerate",
+                    help="enumerate = DFS over all cycles <=K (cached by topology); "
+                         "bf = length-bounded Bellman-Ford, best cycle <=K per source "
+                         "(O(V*K*E), scales to many currencies)")
+    ap.add_argument("--workers", type=int, default=0,
+                    help="Parallel scenario workers via fork+copy-on-write shared books. "
+                         "0 = auto (min(scenarios, cores-2, 8)); 1 = sequential")
+    ap.add_argument("--progress", action="store_true",
+                    help="Print throttled per-scenario progress (% of ticks, trades so far)")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent
@@ -202,7 +293,9 @@ def main() -> None:
                         depth=args.depth,
                         latency_ms=lat_ms, grid_ms=args.grid_ms,
                         inventory_per_currency_usdt=args.inventory_per_currency_usdt,
-                        max_quote_age_ms=args.max_quote_age_ms)
+                        max_quote_age_ms=args.max_quote_age_ms,
+                        max_cycle_len=args.max_cycle_len,
+                        cycle_engine=args.cycle_engine)
 
     scenarios = build_scenarios(args.date, args.fees_pct, args.latencies_ms, cfg)
     date_tag = args.date.replace("-", "")
@@ -211,28 +304,33 @@ def main() -> None:
     import matplotlib.pyplot as plt
 
     if args.mode == "direct":
-        summaries = []
+        print("Aligning books once (reused across all scenarios)...")
+        direct_prepared = prepare_direct_views(panels)
+        del panels  # free source DataFrames before forking (workers read prepared)
+        _CTX.update(prepared=direct_prepared, results=results, output_tag=output_tag,
+                    progress=args.progress)
+        tasks = [{"key": k, "title": t, "fee_pct": fp, "cfg": c} for k, t, fp, c in scenarios]
+        n_workers = _resolve_workers(args.workers, len(tasks))
+        if n_workers > 1:
+            import multiprocessing as mp
+            print(f"Running {len(tasks)} scenarios on {n_workers} fork workers (shared books, COW)...")
+            with mp.get_context("fork").Pool(processes=n_workers) as pool:
+                out = pool.map(_direct_scenario_worker, tasks)
+        else:
+            print(f"Running {len(tasks)} scenarios sequentially...")
+            out = [_direct_scenario_worker(tk) for tk in tasks]
+
+        summ_by_key = {o["key"]: o["summary"] for o in out}
+        summaries = [summ_by_key[k] for k, _, _, _ in scenarios]
+        for s in summaries:
+            print(f"  {s['scenario']}: trades={s['trades_executed']} "
+                  f"pnl={s['total_pnl_usdt']:.2f} USDT  return={s['total_return_pct']:.3f}%")
+
         fig, ax = plt.subplots(figsize=(10, 4))
         for key, title, fee_pct, cfg in scenarios:
-            print(f"\nRunning: {title}")
-            res = run_l2_backtest(panels, cfg)
-            s = res.summary()
-            s["scenario"] = title
-            s["fee_pct"] = fee_pct
-            s["fee_per_leg"] = cfg.fee
-            s["latency_ms"] = cfg.latency_ms
-            s["max_quote_age_ms"] = cfg.max_quote_age_ms
-            summaries.append(s)
-            print(f"  trades={s['trades_executed']}  pnl={s['total_pnl_usdt']:.2f} USDT  "
-                  f"return={s['total_return_pct']:.3f}%  raw_crosses={s['raw_cross_candidates']}  "
-                  f"exec_candidates={s['executable_candidates']}  "
-                  f"inventory_skips={s['inventory_skips']}")
-            print(f"  by_route={s['by_route']}")
-
-            res.equity_curve.to_csv(results / f"tardis_equity_{key}{output_tag}.csv", header=["equity"])
-            write_trades_csv(res.trades, results / f"tardis_trades_{key}{output_tag}.csv")
-            if not res.equity_curve.empty:
-                res.equity_curve.plot(ax=ax, lw=1.1, label=title)
+            eq = pd.read_csv(results / f"tardis_equity_{key}{output_tag}.csv", index_col=0)
+            if not eq.empty:
+                ax.plot(pd.to_datetime(eq.index, format="ISO8601"), eq["equity"], lw=1.1, label=title)
 
         ax.set_title(f"L2 cross-exchange arbitrage — Tardis {args.date} ({'/'.join(venues)})")
         ax.set_ylabel("Capital (USDT)")
@@ -300,48 +398,34 @@ def main() -> None:
         raise SystemExit("Need at least three available pair panels for combined mode.")
 
     pair_labels = [f"{base}/{quote}" for base, quote in triangle_pairs]
-    combined_summaries = []
-    triangle_path_cache = {}
+    print("Aligning books once (reused across all scenarios)...")
+    combined_prepared = prepare_combined_views(panels, pair_panels)
+    del panels, pair_panels  # free source DataFrames before forking
+    _CTX.update(prepared=combined_prepared, results=results, output_tag=output_tag,
+                progress=args.progress)
+    tasks = [{"key": k, "title": t, "fee_pct": fp, "cfg": c} for k, t, fp, c in scenarios]
+    n_workers = _resolve_workers(args.workers, len(tasks))
+    if n_workers > 1:
+        import multiprocessing as mp
+        print(f"Running {len(tasks)} scenarios on {n_workers} fork workers (shared books, COW)...")
+        with mp.get_context("fork").Pool(processes=n_workers) as pool:
+            out = pool.map(_combined_scenario_worker, tasks)
+    else:
+        print(f"Running {len(tasks)} scenarios sequentially...")
+        out = [_combined_scenario_worker(tk) for tk in tasks]
+
+    summ_by_key = {o["key"]: o["summary"] for o in out}
+    combined_summaries = [summ_by_key[k] for k, _, _, _ in scenarios]
+    for s in combined_summaries:
+        print(f"  {s['scenario']}: trades={s['trades_executed']} "
+              f"(D={s['direct_trades_executed']} T={s['triangular_trades_executed']}) "
+              f"pnl={s['total_pnl_usdt']:.2f} USDT  return={s['total_return_pct']:.3f}%")
+
     fig, ax = plt.subplots(figsize=(10, 4))
     for key, title, fee_pct, cfg in scenarios:
-        print(f"\nRunning combined direct+triangles: {title}")
-        res = run_l2_combined_backtest(
-            panels,
-            pair_panels,
-            cfg,
-            triangle_path_cache=triangle_path_cache,
-        )
-        s = res.summary()
-        s["scenario"] = title
-        s["fee_pct"] = fee_pct
-        s["fee_per_leg"] = cfg.fee
-        s["latency_ms"] = cfg.latency_ms
-        s["max_quote_age_ms"] = cfg.max_quote_age_ms
-        combined_summaries.append(s)
-        print(f"  trades={s['trades_executed']}  direct={s['direct_trades_executed']}  "
-              f"triangles={s['triangular_trades_executed']}  "
-              f"pnl={s['total_pnl_usdt']:.2f} USDT  return={s['total_return_pct']:.3f}%  "
-              f"raw_crosses={s['raw_cross_candidates']}  raw_cycles={s['raw_cycles']}  "
-              f"exec_candidates={s['executable_candidates']}  "
-              f"inventory_skips={s['inventory_skips']}")
-        print(f"  by_type={s['by_type']}")
-        print(f"  by_route={s['by_route']}")
-        print(f"  by_cycle={s['by_cycle']}")
-
-        res.equity_curve.to_csv(
-            results / f"tardis_combined_equity_{key}{output_tag}.csv",
-            header=["equity"],
-        )
-        write_trades_csv(
-            res.direct_trades,
-            results / f"tardis_combined_direct_trades_{key}{output_tag}.csv",
-        )
-        write_triangular_trades_csv(
-            res.triangular_trades,
-            results / f"tardis_combined_triangle_trades_{key}{output_tag}.csv",
-        )
-        if not res.equity_curve.empty:
-            res.equity_curve.plot(ax=ax, lw=1.1, label=title)
+        eq = pd.read_csv(results / f"tardis_combined_equity_{key}{output_tag}.csv", index_col=0)
+        if not eq.empty:
+            ax.plot(pd.to_datetime(eq.index, format="ISO8601"), eq["equity"], lw=1.1, label=title)
 
     ax.set_title(f"L2 combined direct + triangles — Tardis {args.date}")
     ax.set_ylabel("Capital (USDT)")

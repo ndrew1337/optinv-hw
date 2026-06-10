@@ -168,3 +168,146 @@ def enumerate_triangles(graph: ExchangeGraph) -> List[ArbitrageCycle]:
                     )
     out.sort(key=lambda c: c.total_weight)
     return out
+
+
+def bounded_bellman_ford_cycles(
+    graph: ExchangeGraph,
+    max_len: int = 3,
+    min_len: int = 2,
+) -> List[ArbitrageCycle]:
+    """Length-bounded Bellman-Ford: best (most-negative) cycle of length <= K
+    per source currency.
+
+    DP over `dist[k][v]` = min weight of a walk of EXACTLY k edges from the
+    source to v (with predecessor edges for reconstruction). After K rounds,
+    `dist[k][source] < 0` for some k in [min_len, max_len] is a profitable
+    closed walk; we keep the most negative per source and reconstruct it.
+
+    Cost: O(V * K * E) — polynomial in K (unlike enumerate's O(V^K)), so this is
+    the scalable engine when the currency universe grows. Non-simple walks
+    (a repeated currency) are discarded so executed cycles stay well-formed.
+    """
+    nodes = graph.currencies
+    adj: Dict[str, List[WeightedEdge]] = {}
+    for e in graph.edges:
+        adj.setdefault(e.u, []).append(e)
+
+    fee_factor = 1.0 - graph.fee
+    out: List[ArbitrageCycle] = []
+    seen: Set[tuple] = set()
+
+    for s in nodes:
+        dist = [dict.fromkeys(nodes, INF) for _ in range(max_len + 1)]
+        pred: List[Dict[str, WeightedEdge]] = [dict() for _ in range(max_len + 1)]
+        dist[0][s] = 0.0
+        for k in range(1, max_len + 1):
+            dk, dk1, pk = dist[k], dist[k - 1], pred[k]
+            for u in nodes:
+                du = dk1[u]
+                if du == INF:
+                    continue
+                for e in adj.get(u, ()):  # noqa: B007
+                    nd = du + e.weight
+                    if nd < dk[e.v] - 1e-15:
+                        dk[e.v] = nd
+                        pk[e.v] = e
+
+        best_k, best_w = None, -1e-12
+        for k in range(min_len, max_len + 1):
+            if dist[k][s] < best_w:
+                best_w, best_k = dist[k][s], k
+        if best_k is None:
+            continue
+
+        # reconstruct the best_k-edge walk ending back at s
+        edges: List[WeightedEdge] = []
+        cur, ok = s, True
+        for k in range(best_k, 0, -1):
+            e = pred[k].get(cur)
+            if e is None:
+                ok = False
+                break
+            edges.append(e)
+            cur = e.u
+        if not ok or cur != s:
+            continue
+        edges.reverse()
+        path_nodes = [s] + [e.v for e in edges]  # [s, ..., s]
+        internal = path_nodes[:-1]
+        if len(set(internal)) != len(internal):  # keep only simple cycles
+            continue
+        key = min(tuple(internal[i:] + internal[:i]) for i in range(len(internal)))
+        if key in seen:
+            continue
+        seen.add(key)
+        gross = 1.0
+        for e in edges:
+            gross *= e.rate * fee_factor
+        out.append(
+            ArbitrageCycle(
+                currencies=path_nodes,
+                edges=edges,
+                total_weight=sum(e.weight for e in edges),
+                gross_multiplier=gross,
+            )
+        )
+
+    out.sort(key=lambda c: c.total_weight)
+    return out
+
+
+def enumerate_cycles(
+    graph: ExchangeGraph,
+    max_len: int = 3,
+    min_len: int = 2,
+) -> List[ArbitrageCycle]:
+    """All simple NEGATIVE cycles with edge-length in [min_len, max_len].
+
+    Generalises `enumerate_triangles` to arbitrary K via depth-bounded DFS:
+    a profitable arbitrage cycle (product of rates after fee > 1) is exactly a
+    negative cycle (sum of -ln weights < 0). Cycles are deduped by canonical
+    rotation and returned best (most negative) first.
+    """
+    adj: Dict[str, List[WeightedEdge]] = {}
+    for e in graph.edges:
+        adj.setdefault(e.u, []).append(e)
+
+    fee_factor = 1.0 - graph.fee
+    out: List[ArbitrageCycle] = []
+    seen: Set[tuple] = set()
+
+    def _canon(nodes: List[str]) -> tuple:
+        return min(tuple(nodes[i:] + nodes[:i]) for i in range(len(nodes)))
+
+    for start in graph.currencies:
+        # DFS stack: (node, path_nodes, path_edges, total_weight, visited)
+        stack = [(start, [start], [], 0.0, {start})]
+        while stack:
+            node, pnodes, pedges, w, visited = stack.pop()
+            for e in adj.get(node, ()):  # noqa: B007
+                v = e.v
+                if v == start:
+                    clen = len(pedges) + 1
+                    if min_len <= clen <= max_len and w + e.weight < -1e-12:
+                        key = _canon(pnodes)
+                        if key not in seen:
+                            seen.add(key)
+                            edges = pedges + [e]
+                            gross = 1.0
+                            for ee in edges:
+                                gross *= ee.rate * fee_factor
+                            out.append(
+                                ArbitrageCycle(
+                                    currencies=pnodes + [start],
+                                    edges=edges,
+                                    total_weight=w + e.weight,
+                                    gross_multiplier=gross,
+                                )
+                            )
+                elif v not in visited and len(pedges) < max_len - 1:
+                    stack.append(
+                        (v, pnodes + [v], pedges + [e], w + e.weight, visited | {v})
+                    )
+
+    out.sort(key=lambda c: c.total_weight)
+    return out

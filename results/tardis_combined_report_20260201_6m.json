@@ -1,0 +1,2346 @@
+{
+  "data_source": "Tardis.dev free first-of-month L2 sample (book_snapshot_25)",
+  "date": "2026-02-01",
+  "venues": [
+    "binance",
+    "bybit",
+    "okx",
+    "gate",
+    "huobi"
+  ],
+  "assets": [
+    "ADA",
+    "BNB",
+    "BTC",
+    "DOGE",
+    "ETH",
+    "LINK",
+    "SOL",
+    "XRP"
+  ],
+  "pairs": [
+    "ADA/BNB",
+    "ADA/BTC",
+    "ADA/ETH",
+    "ADA/USDT",
+    "BNB/BTC",
+    "BNB/USDT",
+    "BTC/USDT",
+    "DOGE/BTC",
+    "DOGE/USDT",
+    "ETH/BTC",
+    "ETH/USDT",
+    "LINK/BTC",
+    "LINK/ETH",
+    "LINK/USDT",
+    "SOL/BNB",
+    "SOL/BTC",
+    "SOL/ETH",
+    "SOL/USDT",
+    "XRP/BNB",
+    "XRP/BTC",
+    "XRP/ETH",
+    "XRP/USDT"
+  ],
+  "max_notional_usdt": null,
+  "stake_pct": 20.0,
+  "inventory_per_currency_usdt": 5000.0,
+  "min_profit_usdt": 0.0,
+  "min_profit_pct": 0.05,
+  "min_edge_bps": 0.0,
+  "book_depth_levels": 5,
+  "grid_ms": 100,
+  "max_quote_age_ms": 250,
+  "fees_pct": [
+    0.0,
+    0.01,
+    0.1
+  ],
+  "latencies_ms": [
+    0,
+    100,
+    300
+  ],
+  "model": "unified pre-funded inventory strategy: at each signal timestamp, cross-exchange direct candidates and same-exchange length-3 triangular candidates compete for one shared (exchange, currency) inventory; the highest expected-PnL signal is reserved and executed on the first grid point at/after t+Δ; gross triangle path discovery is cached across fee/latency scenarios",
+  "scenarios": [
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029883,
+      "raw_cycles": 27652510,
+      "executable_candidates": 48475,
+      "inventory_skips": 0,
+      "trades_executed": 48475,
+      "direct_trades_executed": 37705,
+      "triangular_trades_executed": 10770,
+      "total_pnl_usdt": 5235.935460952166,
+      "direct_pnl_usdt": 730.4740490508115,
+      "triangular_pnl_usdt": 4505.461411901355,
+      "total_return_pct": 2.327082427089855,
+      "final_capital": 230235.93546095217,
+      "avg_trade_pnl": 0.10801310904491317,
+      "by_type": {
+        "direct": {
+          "trades": 37705,
+          "pnl": 730.474
+        },
+        "triangle": {
+          "trades": 10770,
+          "pnl": 4505.4614
+        }
+      },
+      "by_route": {
+        "bybit->huobi": {
+          "trades": 2906,
+          "pnl": 54.3565
+        },
+        "bybit->gate": {
+          "trades": 70,
+          "pnl": 17.6614
+        },
+        "huobi->okx": {
+          "trades": 1686,
+          "pnl": 74.3479
+        },
+        "gate->huobi": {
+          "trades": 5353,
+          "pnl": 18.461
+        },
+        "huobi->bybit": {
+          "trades": 680,
+          "pnl": 33.0771
+        },
+        "bybit->binance": {
+          "trades": 146,
+          "pnl": 40.9653
+        },
+        "okx->gate": {
+          "trades": 3566,
+          "pnl": 52.3005
+        },
+        "binance->bybit": {
+          "trades": 465,
+          "pnl": 49.236
+        },
+        "okx->huobi": {
+          "trades": 2175,
+          "pnl": 60.6646
+        },
+        "binance->okx": {
+          "trades": 1463,
+          "pnl": 76.9767
+        },
+        "binance->gate": {
+          "trades": 123,
+          "pnl": 17.318
+        },
+        "gate->okx": {
+          "trades": 12303,
+          "pnl": 50.9045
+        },
+        "huobi->gate": {
+          "trades": 447,
+          "pnl": 21.2006
+        },
+        "binance->huobi": {
+          "trades": 704,
+          "pnl": 6.8631
+        },
+        "okx->binance": {
+          "trades": 3431,
+          "pnl": 96.4107
+        },
+        "gate->binance": {
+          "trades": 177,
+          "pnl": 21.7257
+        },
+        "bybit->okx": {
+          "trades": 508,
+          "pnl": 5.2902
+        },
+        "okx->bybit": {
+          "trades": 447,
+          "pnl": 8.2961
+        },
+        "gate->bybit": {
+          "trades": 745,
+          "pnl": 16.5033
+        },
+        "huobi->binance": {
+          "trades": 310,
+          "pnl": 7.9149
+        }
+      },
+      "by_cycle": {
+        "USDT->BTC->DOGE->USDT": {
+          "trades": 308,
+          "pnl": 161.3072
+        },
+        "USDT->BTC->ETH->USDT": {
+          "trades": 1340,
+          "pnl": 1441.5005
+        },
+        "BTC->USDT->ETH->BTC": {
+          "trades": 511,
+          "pnl": 232.6537
+        },
+        "USDT->ETH->BTC->USDT": {
+          "trades": 998,
+          "pnl": 863.6267
+        },
+        "USDT->SOL->BTC->USDT": {
+          "trades": 119,
+          "pnl": 49.3242
+        },
+        "BTC->ETH->USDT->BTC": {
+          "trades": 56,
+          "pnl": 47.6513
+        },
+        "BTC->USDT->SOL->BTC": {
+          "trades": 114,
+          "pnl": 37.3614
+        },
+        "ETH->BTC->USDT->ETH": {
+          "trades": 1042,
+          "pnl": 988.182
+        },
+        "DOGE->USDT->BTC->DOGE": {
+          "trades": 146,
+          "pnl": 147.8433
+        },
+        "BTC->DOGE->USDT->BTC": {
+          "trades": 73,
+          "pnl": 44.1941
+        },
+        "BTC->BNB->USDT->BTC": {
+          "trades": 11,
+          "pnl": 8.7391
+        },
+        "XRP->USDT->ETH->XRP": {
+          "trades": 2,
+          "pnl": 1.6844
+        },
+        "USDT->ETH->XRP->USDT": {
+          "trades": 1,
+          "pnl": 0.6831
+        },
+        "USDT->LINK->ETH->USDT": {
+          "trades": 222,
+          "pnl": 8.2588
+        },
+        "USDT->XRP->BTC->USDT": {
+          "trades": 184,
+          "pnl": 5.5539
+        },
+        "BTC->XRP->USDT->BTC": {
+          "trades": 119,
+          "pnl": 7.0474
+        },
+        "XRP->USDT->BTC->XRP": {
+          "trades": 5,
+          "pnl": 2.8378
+        },
+        "BTC->USDT->XRP->BTC": {
+          "trades": 173,
+          "pnl": 21.949
+        },
+        "SOL->USDT->BTC->SOL": {
+          "trades": 81,
+          "pnl": 46.8936
+        },
+        "BTC->SOL->USDT->BTC": {
+          "trades": 30,
+          "pnl": 20.243
+        },
+        "USDT->BTC->SOL->USDT": {
+          "trades": 20,
+          "pnl": 28.4699
+        },
+        "SOL->USDT->ETH->SOL": {
+          "trades": 33,
+          "pnl": 31.3546
+        },
+        "BNB->USDT->BTC->BNB": {
+          "trades": 1882,
+          "pnl": 3.4661
+        },
+        "ADA->BTC->USDT->ADA": {
+          "trades": 4,
+          "pnl": 19.2319
+        },
+        "USDT->ETH->ADA->USDT": {
+          "trades": 1,
+          "pnl": 0.2447
+        },
+        "BNB->BTC->USDT->BNB": {
+          "trades": 1412,
+          "pnl": 0.1292
+        },
+        "ETH->USDT->BTC->ETH": {
+          "trades": 121,
+          "pnl": 55.9801
+        },
+        "ADA->USDT->BTC->ADA": {
+          "trades": 9,
+          "pnl": 3.4605
+        },
+        "USDT->ETH->SOL->USDT": {
+          "trades": 12,
+          "pnl": 9.9879
+        },
+        "USDT->BTC->XRP->USDT": {
+          "trades": 128,
+          "pnl": 0.8674
+        },
+        "ETH->SOL->USDT->ETH": {
+          "trades": 26,
+          "pnl": 21.8792
+        },
+        "USDT->ETH->LINK->USDT": {
+          "trades": 110,
+          "pnl": 4.7614
+        },
+        "USDT->BTC->BNB->USDT": {
+          "trades": 12,
+          "pnl": 1.2989
+        },
+        "BNB->USDT->SOL->BNB": {
+          "trades": 26,
+          "pnl": 0.0005
+        },
+        "BNB->ADA->USDT->BNB": {
+          "trades": 12,
+          "pnl": 0.0003
+        },
+        "BNB->XRP->USDT->BNB": {
+          "trades": 7,
+          "pnl": 0.0001
+        },
+        "LINK->USDT->ETH->LINK": {
+          "trades": 3,
+          "pnl": 3.5528
+        },
+        "USDT->SOL->ETH->USDT": {
+          "trades": 5,
+          "pnl": 4.1643
+        },
+        "USDT->BNB->BTC->USDT": {
+          "trades": 63,
+          "pnl": 7.1882
+        },
+        "USDT->DOGE->BTC->USDT": {
+          "trades": 555,
+          "pnl": 5.6561
+        },
+        "USDT->ADA->BTC->USDT": {
+          "trades": 453,
+          "pnl": 0.0
+        },
+        "SOL->BTC->USDT->SOL": {
+          "trades": 173,
+          "pnl": 39.4434
+        },
+        "SOL->ETH->USDT->SOL": {
+          "trades": 6,
+          "pnl": 4.0513
+        },
+        "USDT->BTC->ADA->USDT": {
+          "trades": 2,
+          "pnl": 4.1927
+        },
+        "USDT->BNB->SOL->USDT": {
+          "trades": 2,
+          "pnl": 0.4538
+        },
+        "BTC->USDT->DOGE->BTC": {
+          "trades": 33,
+          "pnl": 16.4244
+        },
+        "ADA->USDT->ETH->ADA": {
+          "trades": 4,
+          "pnl": 32.7565
+        },
+        "ETH->USDT->ADA->ETH": {
+          "trades": 2,
+          "pnl": 1.3763
+        },
+        "ADA->ETH->USDT->ADA": {
+          "trades": 2,
+          "pnl": 2.9192
+        },
+        "ETH->USDT->SOL->ETH": {
+          "trades": 6,
+          "pnl": 7.2049
+        },
+        "ETH->ADA->USDT->ETH": {
+          "trades": 1,
+          "pnl": 0.2868
+        },
+        "XRP->BTC->USDT->XRP": {
+          "trades": 22,
+          "pnl": 8.8283
+        },
+        "BNB->SOL->USDT->BNB": {
+          "trades": 39,
+          "pnl": 0.0
+        },
+        "ETH->LINK->USDT->ETH": {
+          "trades": 1,
+          "pnl": 0.1039
+        },
+        "BTC->USDT->BNB->BTC": {
+          "trades": 13,
+          "pnl": 8.8646
+        },
+        "LINK->BTC->USDT->LINK": {
+          "trades": 1,
+          "pnl": 0.844
+        },
+        "BTC->BNB->XRP->BTC": {
+          "trades": 1,
+          "pnl": 1.1928
+        },
+        "ETH->XRP->USDT->ETH": {
+          "trades": 1,
+          "pnl": 1.4018
+        },
+        "BNB->USDT->XRP->BNB": {
+          "trades": 3,
+          "pnl": 0.0
+        },
+        "BNB->SOL->BTC->BNB": {
+          "trades": 7,
+          "pnl": 0.0
+        },
+        "BTC->BNB->SOL->BTC": {
+          "trades": 1,
+          "pnl": 0.7517
+        },
+        "ETH->USDT->XRP->ETH": {
+          "trades": 2,
+          "pnl": 4.6055
+        },
+        "XRP->BTC->ETH->XRP": {
+          "trades": 1,
+          "pnl": 0.7045
+        },
+        "BTC->USDT->ADA->BTC": {
+          "trades": 4,
+          "pnl": 0.104
+        },
+        "DOGE->BTC->USDT->DOGE": {
+          "trades": 9,
+          "pnl": 0.5031
+        },
+        "BTC->USDT->LINK->BTC": {
+          "trades": 3,
+          "pnl": 8.6846
+        },
+        "USDT->BTC->LINK->USDT": {
+          "trades": 1,
+          "pnl": 8.3565
+        },
+        "BTC->LINK->USDT->BTC": {
+          "trades": 1,
+          "pnl": 12.1781
+        }
+      },
+      "scenario": "Без комиссий, без задержки",
+      "fee_pct": 0.0,
+      "fee_per_leg": 0.0,
+      "latency_ms": 0,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029878,
+      "raw_cycles": 27652480,
+      "executable_candidates": 45763,
+      "inventory_skips": 0,
+      "trades_executed": 45763,
+      "direct_trades_executed": 36649,
+      "triangular_trades_executed": 9114,
+      "total_pnl_usdt": 3334.1145992109637,
+      "direct_pnl_usdt": -41.37735711037748,
+      "triangular_pnl_usdt": 3375.491956321341,
+      "total_return_pct": 1.4818287107604355,
+      "final_capital": 228334.11459921097,
+      "avg_trade_pnl": 0.07285611955533867,
+      "by_type": {
+        "direct": {
+          "trades": 36649,
+          "pnl": -41.3774
+        },
+        "triangle": {
+          "trades": 9114,
+          "pnl": 3375.492
+        }
+      },
+      "by_route": {
+        "bybit->huobi": {
+          "trades": 2627,
+          "pnl": -9.0277
+        },
+        "bybit->gate": {
+          "trades": 70,
+          "pnl": -0.8387
+        },
+        "huobi->okx": {
+          "trades": 1594,
+          "pnl": 4.0253
+        },
+        "gate->huobi": {
+          "trades": 5013,
+          "pnl": 0.728
+        },
+        "huobi->bybit": {
+          "trades": 660,
+          "pnl": -7.7062
+        },
+        "bybit->binance": {
+          "trades": 145,
+          "pnl": -1.681
+        },
+        "okx->gate": {
+          "trades": 3533,
+          "pnl": -3.2422
+        },
+        "binance->bybit": {
+          "trades": 467,
+          "pnl": 3.2823
+        },
+        "okx->huobi": {
+          "trades": 2378,
+          "pnl": -21.7261
+        },
+        "binance->okx": {
+          "trades": 1450,
+          "pnl": 15.7241
+        },
+        "binance->gate": {
+          "trades": 113,
+          "pnl": 1.3682
+        },
+        "gate->okx": {
+          "trades": 12039,
+          "pnl": 12.2064
+        },
+        "huobi->gate": {
+          "trades": 432,
+          "pnl": -2.0944
+        },
+        "binance->huobi": {
+          "trades": 672,
+          "pnl": -12.0931
+        },
+        "okx->binance": {
+          "trades": 3343,
+          "pnl": -5.9752
+        },
+        "gate->binance": {
+          "trades": 173,
+          "pnl": -1.3511
+        },
+        "bybit->okx": {
+          "trades": 493,
+          "pnl": 1.237
+        },
+        "okx->bybit": {
+          "trades": 436,
+          "pnl": 0.1792
+        },
+        "gate->bybit": {
+          "trades": 709,
+          "pnl": 0.2782
+        },
+        "huobi->binance": {
+          "trades": 302,
+          "pnl": -14.6705
+        }
+      },
+      "by_cycle": {
+        "USDT->BTC->DOGE->USDT": {
+          "trades": 259,
+          "pnl": 120.3002
+        },
+        "USDT->BTC->ETH->USDT": {
+          "trades": 1176,
+          "pnl": 1147.7454
+        },
+        "BTC->USDT->ETH->BTC": {
+          "trades": 503,
+          "pnl": 202.8871
+        },
+        "USDT->ETH->BTC->USDT": {
+          "trades": 859,
+          "pnl": 693.6472
+        },
+        "DOGE->USDT->BTC->DOGE": {
+          "trades": 138,
+          "pnl": 117.8024
+        },
+        "USDT->SOL->BTC->USDT": {
+          "trades": 72,
+          "pnl": 15.7002
+        },
+        "BTC->ETH->USDT->BTC": {
+          "trades": 42,
+          "pnl": 21.1289
+        },
+        "BTC->USDT->SOL->BTC": {
+          "trades": 91,
+          "pnl": 5.4041
+        },
+        "ETH->BTC->USDT->ETH": {
+          "trades": 942,
+          "pnl": 812.3332
+        },
+        "BTC->DOGE->USDT->BTC": {
+          "trades": 78,
+          "pnl": 40.0876
+        },
+        "BTC->BNB->USDT->BTC": {
+          "trades": 11,
+          "pnl": 3.4834
+        },
+        "XRP->USDT->ETH->XRP": {
+          "trades": 2,
+          "pnl": 0.9787
+        },
+        "USDT->ETH->XRP->USDT": {
+          "trades": 1,
+          "pnl": 0.319
+        },
+        "USDT->LINK->ETH->USDT": {
+          "trades": 161,
+          "pnl": 5.576
+        },
+        "USDT->XRP->BTC->USDT": {
+          "trades": 122,
+          "pnl": 3.0375
+        },
+        "BTC->XRP->USDT->BTC": {
+          "trades": 124,
+          "pnl": 1.3631
+        },
+        "XRP->USDT->BTC->XRP": {
+          "trades": 5,
+          "pnl": 0.4825
+        },
+        "BTC->USDT->XRP->BTC": {
+          "trades": 161,
+          "pnl": 17.5831
+        },
+        "SOL->USDT->BTC->SOL": {
+          "trades": 73,
+          "pnl": 41.7576
+        },
+        "BTC->SOL->USDT->BTC": {
+          "trades": 28,
+          "pnl": 7.9559
+        },
+        "USDT->BTC->SOL->USDT": {
+          "trades": 12,
+          "pnl": 5.3847
+        },
+        "BNB->USDT->BTC->BNB": {
+          "trades": 1645,
+          "pnl": 3.1067
+        },
+        "ADA->BTC->USDT->ADA": {
+          "trades": 4,
+          "pnl": -11.5426
+        },
+        "USDT->ETH->ADA->USDT": {
+          "trades": 1,
+          "pnl": -0.1612
+        },
+        "BNB->BTC->USDT->BNB": {
+          "trades": 1001,
+          "pnl": 0.0824
+        },
+        "ADA->USDT->BTC->ADA": {
+          "trades": 9,
+          "pnl": -2.7842
+        },
+        "ETH->USDT->BTC->ETH": {
+          "trades": 108,
+          "pnl": 48.3506
+        },
+        "USDT->ETH->SOL->USDT": {
+          "trades": 12,
+          "pnl": -0.3096
+        },
+        "USDT->BTC->XRP->USDT": {
+          "trades": 114,
+          "pnl": 1.8666
+        },
+        "ETH->SOL->USDT->ETH": {
+          "trades": 20,
+          "pnl": -1.2224
+        },
+        "USDT->ETH->LINK->USDT": {
+          "trades": 92,
+          "pnl": -2.8817
+        },
+        "USDT->BTC->BNB->USDT": {
+          "trades": 11,
+          "pnl": 0.3591
+        },
+        "BNB->USDT->SOL->BNB": {
+          "trades": 23,
+          "pnl": 0.0004
+        },
+        "BNB->ADA->USDT->BNB": {
+          "trades": 8,
+          "pnl": 0.0002
+        },
+        "BNB->XRP->USDT->BNB": {
+          "trades": 7,
+          "pnl": 0.0001
+        },
+        "LINK->USDT->ETH->LINK": {
+          "trades": 2,
+          "pnl": -1.8794
+        },
+        "ETH->USDT->SOL->ETH": {
+          "trades": 5,
+          "pnl": -2.0984
+        },
+        "USDT->BNB->BTC->USDT": {
+          "trades": 43,
+          "pnl": 1.7021
+        },
+        "USDT->DOGE->BTC->USDT": {
+          "trades": 456,
+          "pnl": 2.7309
+        },
+        "USDT->ADA->BTC->USDT": {
+          "trades": 295,
+          "pnl": 0.0003
+        },
+        "ETH->LINK->USDT->ETH": {
+          "trades": 2,
+          "pnl": -1.6496
+        },
+        "SOL->BTC->USDT->SOL": {
+          "trades": 228,
+          "pnl": 52.3343
+        },
+        "ETH->XRP->USDT->ETH": {
+          "trades": 2,
+          "pnl": -0.3088
+        },
+        "USDT->BTC->ADA->USDT": {
+          "trades": 2,
+          "pnl": -8.8748
+        },
+        "BNB->SOL->USDT->BNB": {
+          "trades": 33,
+          "pnl": 0.0
+        },
+        "BTC->USDT->DOGE->BTC": {
+          "trades": 33,
+          "pnl": 15.4703
+        },
+        "DOGE->BTC->USDT->DOGE": {
+          "trades": 8,
+          "pnl": 0.8
+        },
+        "ADA->USDT->ETH->ADA": {
+          "trades": 3,
+          "pnl": 6.7202
+        },
+        "SOL->USDT->ETH->SOL": {
+          "trades": 25,
+          "pnl": 2.1425
+        },
+        "ETH->USDT->ADA->ETH": {
+          "trades": 2,
+          "pnl": -1.4873
+        },
+        "ADA->ETH->USDT->ADA": {
+          "trades": 2,
+          "pnl": -4.9853
+        },
+        "ETH->ADA->USDT->ETH": {
+          "trades": 1,
+          "pnl": -0.1664
+        },
+        "USDT->SOL->ETH->USDT": {
+          "trades": 3,
+          "pnl": -0.7882
+        },
+        "XRP->BTC->USDT->XRP": {
+          "trades": 19,
+          "pnl": 0.7102
+        },
+        "BTC->USDT->BNB->BTC": {
+          "trades": 11,
+          "pnl": 5.8146
+        },
+        "SOL->ETH->USDT->SOL": {
+          "trades": 2,
+          "pnl": -0.3729
+        },
+        "USDT->BNB->SOL->USDT": {
+          "trades": 1,
+          "pnl": -0.5033
+        },
+        "LINK->BTC->USDT->LINK": {
+          "trades": 1,
+          "pnl": -2.1951
+        },
+        "BTC->BNB->XRP->BTC": {
+          "trades": 1,
+          "pnl": -1.9955
+        },
+        "BNB->USDT->XRP->BNB": {
+          "trades": 3,
+          "pnl": -0.0
+        },
+        "BNB->SOL->BTC->BNB": {
+          "trades": 5,
+          "pnl": 0.0
+        },
+        "BTC->BNB->SOL->BTC": {
+          "trades": 1,
+          "pnl": -0.1541
+        },
+        "ETH->USDT->XRP->ETH": {
+          "trades": 1,
+          "pnl": 2.178
+        },
+        "XRP->BTC->ETH->XRP": {
+          "trades": 1,
+          "pnl": -0.2058
+        },
+        "BTC->USDT->ADA->BTC": {
+          "trades": 4,
+          "pnl": 0.0729
+        },
+        "BTC->USDT->LINK->BTC": {
+          "trades": 2,
+          "pnl": 1.9927
+        },
+        "BTC->LINK->USDT->BTC": {
+          "trades": 2,
+          "pnl": 10.6655
+        }
+      },
+      "scenario": "Без комиссий, задержка 100мс",
+      "fee_pct": 0.0,
+      "fee_per_leg": 0.0,
+      "latency_ms": 100,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029868,
+      "raw_cycles": 27652414,
+      "executable_candidates": 42853,
+      "inventory_skips": 0,
+      "trades_executed": 42853,
+      "direct_trades_executed": 35842,
+      "triangular_trades_executed": 7011,
+      "total_pnl_usdt": 2033.1338625268309,
+      "direct_pnl_usdt": -141.75635412925348,
+      "triangular_pnl_usdt": 2174.8902166560842,
+      "total_return_pct": 0.90361505001193,
+      "final_capital": 227033.13386252683,
+      "avg_trade_pnl": 0.047444376415346205,
+      "by_type": {
+        "direct": {
+          "trades": 35842,
+          "pnl": -141.7564
+        },
+        "triangle": {
+          "trades": 7011,
+          "pnl": 2174.8902
+        }
+      },
+      "by_route": {
+        "bybit->huobi": {
+          "trades": 2369,
+          "pnl": -14.6489
+        },
+        "bybit->gate": {
+          "trades": 71,
+          "pnl": -4.1183
+        },
+        "huobi->okx": {
+          "trades": 1507,
+          "pnl": -14.3037
+        },
+        "gate->huobi": {
+          "trades": 4951,
+          "pnl": -1.7752
+        },
+        "huobi->bybit": {
+          "trades": 640,
+          "pnl": -17.9688
+        },
+        "bybit->binance": {
+          "trades": 146,
+          "pnl": -7.0782
+        },
+        "okx->gate": {
+          "trades": 3539,
+          "pnl": -9.5515
+        },
+        "binance->bybit": {
+          "trades": 463,
+          "pnl": -1.0038
+        },
+        "okx->huobi": {
+          "trades": 2432,
+          "pnl": -30.0634
+        },
+        "binance->okx": {
+          "trades": 1447,
+          "pnl": 6.5263
+        },
+        "binance->gate": {
+          "trades": 111,
+          "pnl": -1.2558
+        },
+        "gate->okx": {
+          "trades": 11764,
+          "pnl": 4.8607
+        },
+        "huobi->gate": {
+          "trades": 414,
+          "pnl": -6.8948
+        },
+        "binance->huobi": {
+          "trades": 639,
+          "pnl": -11.2285
+        },
+        "okx->binance": {
+          "trades": 3308,
+          "pnl": -14.8454
+        },
+        "gate->binance": {
+          "trades": 177,
+          "pnl": -2.4566
+        },
+        "bybit->okx": {
+          "trades": 469,
+          "pnl": 0.8166
+        },
+        "okx->bybit": {
+          "trades": 431,
+          "pnl": -0.4973
+        },
+        "gate->bybit": {
+          "trades": 664,
+          "pnl": -5.3564
+        },
+        "huobi->binance": {
+          "trades": 300,
+          "pnl": -10.9134
+        }
+      },
+      "by_cycle": {
+        "USDT->BTC->DOGE->USDT": {
+          "trades": 177,
+          "pnl": 65.5209
+        },
+        "DOGE->USDT->BTC->DOGE": {
+          "trades": 126,
+          "pnl": 87.3478
+        },
+        "BTC->DOGE->USDT->BTC": {
+          "trades": 85,
+          "pnl": 31.9777
+        },
+        "BTC->USDT->ETH->BTC": {
+          "trades": 349,
+          "pnl": 90.5711
+        },
+        "USDT->ETH->BTC->USDT": {
+          "trades": 898,
+          "pnl": 555.2381
+        },
+        "USDT->SOL->BTC->USDT": {
+          "trades": 115,
+          "pnl": 19.341
+        },
+        "BTC->ETH->USDT->BTC": {
+          "trades": 46,
+          "pnl": 8.5956
+        },
+        "BTC->USDT->SOL->BTC": {
+          "trades": 113,
+          "pnl": 7.1823
+        },
+        "ETH->BTC->USDT->ETH": {
+          "trades": 932,
+          "pnl": 622.0883
+        },
+        "USDT->BTC->ETH->USDT": {
+          "trades": 988,
+          "pnl": 676.1617
+        },
+        "BTC->BNB->USDT->BTC": {
+          "trades": 10,
+          "pnl": 2.9804
+        },
+        "XRP->USDT->ETH->XRP": {
+          "trades": 2,
+          "pnl": 1.0195
+        },
+        "USDT->XRP->BTC->USDT": {
+          "trades": 64,
+          "pnl": 1.065
+        },
+        "BTC->XRP->USDT->BTC": {
+          "trades": 135,
+          "pnl": 1.4704
+        },
+        "XRP->USDT->BTC->XRP": {
+          "trades": 3,
+          "pnl": -0.2527
+        },
+        "BTC->USDT->XRP->BTC": {
+          "trades": 156,
+          "pnl": 11.5912
+        },
+        "SOL->USDT->BTC->SOL": {
+          "trades": 83,
+          "pnl": 34.9087
+        },
+        "USDT->BTC->SOL->USDT": {
+          "trades": 15,
+          "pnl": -1.4702
+        },
+        "BTC->SOL->USDT->BTC": {
+          "trades": 21,
+          "pnl": 1.1648
+        },
+        "SOL->USDT->ETH->SOL": {
+          "trades": 23,
+          "pnl": -0.7019
+        },
+        "BNB->USDT->BTC->BNB": {
+          "trades": 1397,
+          "pnl": 2.2292
+        },
+        "USDT->BTC->BNB->USDT": {
+          "trades": 13,
+          "pnl": 0.3523
+        },
+        "ADA->BTC->USDT->ADA": {
+          "trades": 4,
+          "pnl": -15.3156
+        },
+        "ETH->ADA->USDT->ETH": {
+          "trades": 2,
+          "pnl": -0.5994
+        },
+        "BNB->BTC->USDT->BNB": {
+          "trades": 401,
+          "pnl": 0.2029
+        },
+        "ETH->USDT->BTC->ETH": {
+          "trades": 108,
+          "pnl": 34.8347
+        },
+        "ADA->USDT->BTC->ADA": {
+          "trades": 8,
+          "pnl": -0.5135
+        },
+        "USDT->ETH->SOL->USDT": {
+          "trades": 11,
+          "pnl": -2.9251
+        },
+        "USDT->BTC->XRP->USDT": {
+          "trades": 90,
+          "pnl": 0.923
+        },
+        "ETH->SOL->USDT->ETH": {
+          "trades": 21,
+          "pnl": -2.1847
+        },
+        "BNB->USDT->SOL->BNB": {
+          "trades": 18,
+          "pnl": 0.0005
+        },
+        "BNB->ADA->USDT->BNB": {
+          "trades": 3,
+          "pnl": -0.0011
+        },
+        "BNB->XRP->USDT->BNB": {
+          "trades": 7,
+          "pnl": 0.0001
+        },
+        "LINK->USDT->ETH->LINK": {
+          "trades": 2,
+          "pnl": -1.8437
+        },
+        "ETH->USDT->SOL->ETH": {
+          "trades": 5,
+          "pnl": -6.994
+        },
+        "USDT->BNB->BTC->USDT": {
+          "trades": 15,
+          "pnl": 1.3476
+        },
+        "USDT->DOGE->BTC->USDT": {
+          "trades": 151,
+          "pnl": 3.7658
+        },
+        "USDT->LINK->ETH->USDT": {
+          "trades": 77,
+          "pnl": 1.9381
+        },
+        "ETH->LINK->USDT->ETH": {
+          "trades": 3,
+          "pnl": -2.1508
+        },
+        "SOL->BTC->USDT->SOL": {
+          "trades": 147,
+          "pnl": -1.6674
+        },
+        "USDT->ETH->LINK->USDT": {
+          "trades": 72,
+          "pnl": -1.5717
+        },
+        "ETH->XRP->USDT->ETH": {
+          "trades": 1,
+          "pnl": -0.2984
+        },
+        "SOL->ETH->USDT->SOL": {
+          "trades": 6,
+          "pnl": -0.9825
+        },
+        "USDT->BTC->ADA->USDT": {
+          "trades": 3,
+          "pnl": -12.6021
+        },
+        "BTC->USDT->DOGE->BTC": {
+          "trades": 27,
+          "pnl": 7.7966
+        },
+        "ADA->USDT->ETH->ADA": {
+          "trades": 4,
+          "pnl": -16.7177
+        },
+        "ETH->USDT->ADA->ETH": {
+          "trades": 2,
+          "pnl": -1.6532
+        },
+        "ADA->ETH->USDT->ADA": {
+          "trades": 2,
+          "pnl": -4.7947
+        },
+        "XRP->BTC->USDT->XRP": {
+          "trades": 20,
+          "pnl": 0.4748
+        },
+        "BNB->SOL->USDT->BNB": {
+          "trades": 17,
+          "pnl": 0.0
+        },
+        "USDT->BNB->SOL->USDT": {
+          "trades": 1,
+          "pnl": -0.752
+        },
+        "LINK->BTC->USDT->LINK": {
+          "trades": 1,
+          "pnl": -1.871
+        },
+        "BTC->USDT->BNB->BTC": {
+          "trades": 8,
+          "pnl": 2.5597
+        },
+        "BNB->USDT->XRP->BNB": {
+          "trades": 3,
+          "pnl": -0.0
+        },
+        "BTC->BNB->SOL->BTC": {
+          "trades": 1,
+          "pnl": -0.8133
+        },
+        "BNB->SOL->BTC->BNB": {
+          "trades": 1,
+          "pnl": 0.0
+        },
+        "ETH->USDT->XRP->ETH": {
+          "trades": 1,
+          "pnl": -1.7017
+        },
+        "XRP->BTC->ETH->XRP": {
+          "trades": 1,
+          "pnl": -1.4521
+        },
+        "BTC->USDT->ADA->BTC": {
+          "trades": 4,
+          "pnl": 0.0535
+        },
+        "USDT->SOL->ETH->USDT": {
+          "trades": 2,
+          "pnl": -0.15
+        },
+        "DOGE->BTC->USDT->DOGE": {
+          "trades": 7,
+          "pnl": -2.5328
+        },
+        "BTC->USDT->LINK->BTC": {
+          "trades": 1,
+          "pnl": -2.2413
+        },
+        "USDT->BTC->LINK->USDT": {
+          "trades": 1,
+          "pnl": -3.3278
+        },
+        "BTC->LINK->USDT->BTC": {
+          "trades": 1,
+          "pnl": -9.731
+        }
+      },
+      "scenario": "Без комиссий, задержка 300мс",
+      "fee_pct": 0.0,
+      "fee_per_leg": 0.0,
+      "latency_ms": 300,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029883,
+      "raw_cycles": 27652510,
+      "executable_candidates": 6899,
+      "inventory_skips": 0,
+      "trades_executed": 6899,
+      "direct_trades_executed": 5362,
+      "triangular_trades_executed": 1537,
+      "total_pnl_usdt": 579.1025166364126,
+      "direct_pnl_usdt": 367.51573216465374,
+      "triangular_pnl_usdt": 211.58678447175888,
+      "total_return_pct": 0.25737889628285604,
+      "final_capital": 225579.10251663643,
+      "avg_trade_pnl": 0.0839400661887828,
+      "by_type": {
+        "direct": {
+          "trades": 5362,
+          "pnl": 367.5157
+        },
+        "triangle": {
+          "trades": 1537,
+          "pnl": 211.5868
+        }
+      },
+      "by_route": {
+        "huobi->okx": {
+          "trades": 295,
+          "pnl": 28.0885
+        },
+        "bybit->huobi": {
+          "trades": 1468,
+          "pnl": 26.7795
+        },
+        "binance->okx": {
+          "trades": 226,
+          "pnl": 39.4384
+        },
+        "gate->okx": {
+          "trades": 664,
+          "pnl": 23.819
+        },
+        "huobi->bybit": {
+          "trades": 214,
+          "pnl": 20.3128
+        },
+        "binance->bybit": {
+          "trades": 154,
+          "pnl": 24.9691
+        },
+        "gate->huobi": {
+          "trades": 676,
+          "pnl": 8.2815
+        },
+        "huobi->gate": {
+          "trades": 173,
+          "pnl": 11.1873
+        },
+        "bybit->binance": {
+          "trades": 69,
+          "pnl": 27.5889
+        },
+        "okx->binance": {
+          "trades": 159,
+          "pnl": 46.9422
+        },
+        "gate->binance": {
+          "trades": 38,
+          "pnl": 5.5432
+        },
+        "okx->huobi": {
+          "trades": 310,
+          "pnl": 29.5583
+        },
+        "bybit->gate": {
+          "trades": 23,
+          "pnl": 8.2112
+        },
+        "huobi->binance": {
+          "trades": 146,
+          "pnl": 8.0314
+        },
+        "binance->huobi": {
+          "trades": 364,
+          "pnl": 17.6075
+        },
+        "okx->gate": {
+          "trades": 36,
+          "pnl": 14.2532
+        },
+        "okx->bybit": {
+          "trades": 63,
+          "pnl": 5.8698
+        },
+        "gate->bybit": {
+          "trades": 242,
+          "pnl": 9.8194
+        },
+        "binance->gate": {
+          "trades": 27,
+          "pnl": 9.1617
+        },
+        "bybit->okx": {
+          "trades": 15,
+          "pnl": 2.0529
+        }
+      },
+      "by_cycle": {
+        "DOGE->USDT->BTC->DOGE": {
+          "trades": 25,
+          "pnl": 13.7224
+        },
+        "BTC->ETH->USDT->BTC": {
+          "trades": 5,
+          "pnl": 2.8502
+        },
+        "BTC->DOGE->USDT->BTC": {
+          "trades": 14,
+          "pnl": 7.2016
+        },
+        "USDT->ETH->BTC->USDT": {
+          "trades": 21,
+          "pnl": 2.7032
+        },
+        "ETH->XRP->USDT->ETH": {
+          "trades": 1,
+          "pnl": 0.4738
+        },
+        "USDT->ETH->XRP->USDT": {
+          "trades": 2,
+          "pnl": 1.4465
+        },
+        "USDT->BTC->DOGE->USDT": {
+          "trades": 30,
+          "pnl": 6.4327
+        },
+        "USDT->BTC->XRP->USDT": {
+          "trades": 14,
+          "pnl": 1.7046
+        },
+        "ADA->BTC->USDT->ADA": {
+          "trades": 83,
+          "pnl": 11.5677
+        },
+        "ADA->USDT->BTC->ADA": {
+          "trades": 1,
+          "pnl": 0.1274
+        },
+        "USDT->BTC->ETH->USDT": {
+          "trades": 22,
+          "pnl": 19.923
+        },
+        "USDT->BTC->SOL->USDT": {
+          "trades": 6,
+          "pnl": 12.7396
+        },
+        "USDT->DOGE->BTC->USDT": {
+          "trades": 72,
+          "pnl": 0.3289
+        },
+        "USDT->BNB->BTC->USDT": {
+          "trades": 21,
+          "pnl": 0.766
+        },
+        "USDT->ETH->LINK->USDT": {
+          "trades": 3,
+          "pnl": 0.6921
+        },
+        "ETH->LINK->USDT->ETH": {
+          "trades": 2,
+          "pnl": 0.5473
+        },
+        "LINK->USDT->ETH->LINK": {
+          "trades": 2,
+          "pnl": 3.1868
+        },
+        "USDT->LINK->ETH->USDT": {
+          "trades": 2,
+          "pnl": 0.2525
+        },
+        "BTC->USDT->ETH->BTC": {
+          "trades": 11,
+          "pnl": 6.0287
+        },
+        "ADA->USDT->ETH->ADA": {
+          "trades": 1,
+          "pnl": 15.6536
+        },
+        "SOL->USDT->ETH->SOL": {
+          "trades": 2,
+          "pnl": 10.0873
+        },
+        "BTC->USDT->ADA->BTC": {
+          "trades": 1,
+          "pnl": 0.4101
+        },
+        "USDT->BTC->ADA->USDT": {
+          "trades": 1,
+          "pnl": 1.8188
+        },
+        "USDT->ETH->ADA->USDT": {
+          "trades": 2,
+          "pnl": 3.1419
+        },
+        "ETH->BTC->USDT->ETH": {
+          "trades": 28,
+          "pnl": 42.9962
+        },
+        "BNB->USDT->BTC->BNB": {
+          "trades": 725,
+          "pnl": 1.8572
+        },
+        "USDT->SOL->BTC->USDT": {
+          "trades": 7,
+          "pnl": 0.9443
+        },
+        "BNB->BTC->USDT->BNB": {
+          "trades": 183,
+          "pnl": 0.584
+        },
+        "ETH->SOL->USDT->ETH": {
+          "trades": 2,
+          "pnl": 1.5544
+        },
+        "SOL->BTC->USDT->SOL": {
+          "trades": 2,
+          "pnl": 2.549
+        },
+        "BTC->BNB->SOL->BTC": {
+          "trades": 1,
+          "pnl": 0.4004
+        },
+        "BNB->ADA->USDT->BNB": {
+          "trades": 1,
+          "pnl": 0.0018
+        },
+        "BTC->SOL->USDT->BTC": {
+          "trades": 2,
+          "pnl": 0.7929
+        },
+        "ETH->USDT->BTC->ETH": {
+          "trades": 2,
+          "pnl": 2.7495
+        },
+        "USDT->SOL->ETH->USDT": {
+          "trades": 1,
+          "pnl": 1.0602
+        },
+        "USDT->ADA->BTC->USDT": {
+          "trades": 82,
+          "pnl": 0.0712
+        },
+        "BTC->USDT->DOGE->BTC": {
+          "trades": 2,
+          "pnl": 0.5548
+        },
+        "XRP->USDT->BTC->XRP": {
+          "trades": 1,
+          "pnl": 1.1468
+        },
+        "BTC->USDT->XRP->BTC": {
+          "trades": 79,
+          "pnl": 10.2755
+        },
+        "XRP->BTC->USDT->XRP": {
+          "trades": 1,
+          "pnl": 2.7946
+        },
+        "SOL->USDT->BTC->SOL": {
+          "trades": 2,
+          "pnl": 1.2258
+        },
+        "USDT->XRP->BTC->USDT": {
+          "trades": 2,
+          "pnl": 0.0072
+        },
+        "USDT->BTC->BNB->USDT": {
+          "trades": 66,
+          "pnl": 0.3158
+        },
+        "DOGE->BTC->USDT->DOGE": {
+          "trades": 1,
+          "pnl": 0.4581
+        },
+        "USDT->LINK->BTC->USDT": {
+          "trades": 1,
+          "pnl": 2.1542
+        },
+        "USDT->BTC->LINK->USDT": {
+          "trades": 2,
+          "pnl": 13.2861
+        }
+      },
+      "scenario": "Комиссия 0.01%, без задержки",
+      "fee_pct": 0.01,
+      "fee_per_leg": 0.0001,
+      "latency_ms": 0,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029878,
+      "raw_cycles": 27652480,
+      "executable_candidates": 6248,
+      "inventory_skips": 0,
+      "trades_executed": 6248,
+      "direct_trades_executed": 4972,
+      "triangular_trades_executed": 1276,
+      "total_pnl_usdt": -22.808047704867988,
+      "direct_pnl_usdt": -85.72098186683239,
+      "triangular_pnl_usdt": 62.9129341619644,
+      "total_return_pct": -0.010136910091051998,
+      "final_capital": 224977.19195229514,
+      "avg_trade_pnl": -0.003650455778628039,
+      "by_type": {
+        "direct": {
+          "trades": 4972,
+          "pnl": -85.721
+        },
+        "triangle": {
+          "trades": 1276,
+          "pnl": 62.9129
+        }
+      },
+      "by_route": {
+        "huobi->okx": {
+          "trades": 278,
+          "pnl": -7.6094
+        },
+        "bybit->huobi": {
+          "trades": 1211,
+          "pnl": -11.5786
+        },
+        "binance->okx": {
+          "trades": 227,
+          "pnl": 1.9859
+        },
+        "gate->okx": {
+          "trades": 661,
+          "pnl": -0.9458
+        },
+        "huobi->bybit": {
+          "trades": 205,
+          "pnl": -9.6336
+        },
+        "binance->bybit": {
+          "trades": 152,
+          "pnl": -1.6062
+        },
+        "gate->huobi": {
+          "trades": 631,
+          "pnl": -1.5444
+        },
+        "huobi->gate": {
+          "trades": 164,
+          "pnl": -3.3139
+        },
+        "bybit->binance": {
+          "trades": 69,
+          "pnl": -11.4921
+        },
+        "okx->binance": {
+          "trades": 159,
+          "pnl": -13.1816
+        },
+        "gate->binance": {
+          "trades": 38,
+          "pnl": -1.7788
+        },
+        "okx->huobi": {
+          "trades": 300,
+          "pnl": -12.0035
+        },
+        "bybit->gate": {
+          "trades": 24,
+          "pnl": -3.1327
+        },
+        "huobi->binance": {
+          "trades": 139,
+          "pnl": -4.2619
+        },
+        "binance->huobi": {
+          "trades": 334,
+          "pnl": 4.2569
+        },
+        "okx->gate": {
+          "trades": 36,
+          "pnl": -2.9526
+        },
+        "okx->bybit": {
+          "trades": 63,
+          "pnl": -0.7956
+        },
+        "gate->bybit": {
+          "trades": 239,
+          "pnl": 0.8971
+        },
+        "binance->gate": {
+          "trades": 26,
+          "pnl": -6.9147
+        },
+        "bybit->okx": {
+          "trades": 16,
+          "pnl": -0.1153
+        }
+      },
+      "by_cycle": {
+        "DOGE->USDT->BTC->DOGE": {
+          "trades": 22,
+          "pnl": 7.335
+        },
+        "BTC->DOGE->USDT->BTC": {
+          "trades": 15,
+          "pnl": 7.3649
+        },
+        "USDT->ETH->BTC->USDT": {
+          "trades": 17,
+          "pnl": -0.2593
+        },
+        "ETH->XRP->USDT->ETH": {
+          "trades": 1,
+          "pnl": 0.1219
+        },
+        "USDT->ETH->XRP->USDT": {
+          "trades": 1,
+          "pnl": 0.1123
+        },
+        "USDT->BTC->DOGE->USDT": {
+          "trades": 29,
+          "pnl": 4.2452
+        },
+        "USDT->BTC->XRP->USDT": {
+          "trades": 24,
+          "pnl": 0.6846
+        },
+        "ADA->BTC->USDT->ADA": {
+          "trades": 62,
+          "pnl": -9.8616
+        },
+        "ADA->USDT->BTC->ADA": {
+          "trades": 1,
+          "pnl": 0.025
+        },
+        "USDT->BTC->ETH->USDT": {
+          "trades": 20,
+          "pnl": 7.6755
+        },
+        "BTC->ETH->USDT->BTC": {
+          "trades": 3,
+          "pnl": 1.2236
+        },
+        "USDT->BTC->SOL->USDT": {
+          "trades": 6,
+          "pnl": 5.4174
+        },
+        "USDT->DOGE->BTC->USDT": {
+          "trades": 63,
+          "pnl": 0.1513
+        },
+        "USDT->BNB->BTC->USDT": {
+          "trades": 15,
+          "pnl": -0.073
+        },
+        "USDT->ETH->LINK->USDT": {
+          "trades": 2,
+          "pnl": -1.471
+        },
+        "ETH->LINK->USDT->ETH": {
+          "trades": 2,
+          "pnl": -0.6248
+        },
+        "LINK->USDT->ETH->LINK": {
+          "trades": 1,
+          "pnl": -1.324
+        },
+        "BTC->USDT->ETH->BTC": {
+          "trades": 8,
+          "pnl": 0.8166
+        },
+        "ADA->USDT->ETH->ADA": {
+          "trades": 2,
+          "pnl": 5.4318
+        },
+        "SOL->USDT->ETH->SOL": {
+          "trades": 1,
+          "pnl": -0.866
+        },
+        "BTC->USDT->ADA->BTC": {
+          "trades": 1,
+          "pnl": -3.0075
+        },
+        "USDT->BTC->ADA->USDT": {
+          "trades": 1,
+          "pnl": -2.7993
+        },
+        "USDT->ETH->ADA->USDT": {
+          "trades": 1,
+          "pnl": -3.186
+        },
+        "ETH->BTC->USDT->ETH": {
+          "trades": 25,
+          "pnl": 33.0549
+        },
+        "BNB->USDT->BTC->BNB": {
+          "trades": 576,
+          "pnl": 1.5095
+        },
+        "USDT->SOL->BTC->USDT": {
+          "trades": 6,
+          "pnl": 0.4224
+        },
+        "BNB->BTC->USDT->BNB": {
+          "trades": 155,
+          "pnl": 0.4022
+        },
+        "USDT->ETH->SOL->USDT": {
+          "trades": 2,
+          "pnl": -0.5907
+        },
+        "SOL->BTC->USDT->SOL": {
+          "trades": 2,
+          "pnl": 0.9292
+        },
+        "BTC->BNB->SOL->BTC": {
+          "trades": 1,
+          "pnl": -0.438
+        },
+        "BTC->SOL->USDT->BTC": {
+          "trades": 3,
+          "pnl": -0.5011
+        },
+        "ETH->USDT->BTC->ETH": {
+          "trades": 2,
+          "pnl": 1.9428
+        },
+        "USDT->SOL->ETH->USDT": {
+          "trades": 1,
+          "pnl": -1.9484
+        },
+        "USDT->ADA->BTC->USDT": {
+          "trades": 77,
+          "pnl": 0.0697
+        },
+        "XRP->USDT->BTC->XRP": {
+          "trades": 1,
+          "pnl": -0.6134
+        },
+        "BTC->USDT->XRP->BTC": {
+          "trades": 91,
+          "pnl": 11.2911
+        },
+        "XRP->BTC->USDT->XRP": {
+          "trades": 1,
+          "pnl": -2.2799
+        },
+        "SOL->USDT->BTC->SOL": {
+          "trades": 1,
+          "pnl": -3.661
+        },
+        "USDT->BTC->BNB->USDT": {
+          "trades": 30,
+          "pnl": 0.569
+        },
+        "BTC->USDT->DOGE->BTC": {
+          "trades": 1,
+          "pnl": -0.2002
+        },
+        "USDT->LINK->BTC->USDT": {
+          "trades": 1,
+          "pnl": -0.5828
+        },
+        "USDT->BTC->LINK->USDT": {
+          "trades": 2,
+          "pnl": 6.4051
+        }
+      },
+      "scenario": "Комиссия 0.01%, задержка 100мс",
+      "fee_pct": 0.01,
+      "fee_per_leg": 0.0001,
+      "latency_ms": 100,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029868,
+      "raw_cycles": 27652414,
+      "executable_candidates": 5713,
+      "inventory_skips": 0,
+      "trades_executed": 5713,
+      "direct_trades_executed": 4606,
+      "triangular_trades_executed": 1107,
+      "total_pnl_usdt": -150.74250848990118,
+      "direct_pnl_usdt": -136.0583329513583,
+      "triangular_pnl_usdt": -14.684175538542897,
+      "total_return_pct": -0.06699667043995605,
+      "final_capital": 224849.2574915101,
+      "avg_trade_pnl": -0.02638587580778946,
+      "by_type": {
+        "direct": {
+          "trades": 4606,
+          "pnl": -136.0583
+        },
+        "triangle": {
+          "trades": 1107,
+          "pnl": -14.6842
+        }
+      },
+      "by_route": {
+        "huobi->okx": {
+          "trades": 272,
+          "pnl": -13.7886
+        },
+        "bybit->huobi": {
+          "trades": 953,
+          "pnl": -16.8182
+        },
+        "binance->okx": {
+          "trades": 228,
+          "pnl": -3.7171
+        },
+        "gate->okx": {
+          "trades": 658,
+          "pnl": -5.8668
+        },
+        "huobi->bybit": {
+          "trades": 194,
+          "pnl": -16.0241
+        },
+        "binance->bybit": {
+          "trades": 154,
+          "pnl": -1.7837
+        },
+        "gate->huobi": {
+          "trades": 597,
+          "pnl": -2.5705
+        },
+        "huobi->gate": {
+          "trades": 154,
+          "pnl": -3.9463
+        },
+        "bybit->binance": {
+          "trades": 68,
+          "pnl": -15.2572
+        },
+        "okx->binance": {
+          "trades": 157,
+          "pnl": -19.7712
+        },
+        "gate->binance": {
+          "trades": 38,
+          "pnl": -1.4846
+        },
+        "okx->huobi": {
+          "trades": 293,
+          "pnl": -16.957
+        },
+        "bybit->gate": {
+          "trades": 24,
+          "pnl": -5.2836
+        },
+        "huobi->binance": {
+          "trades": 136,
+          "pnl": -3.8991
+        },
+        "binance->huobi": {
+          "trades": 305,
+          "pnl": 5.0653
+        },
+        "okx->gate": {
+          "trades": 36,
+          "pnl": -4.8061
+        },
+        "okx->bybit": {
+          "trades": 64,
+          "pnl": -1.8503
+        },
+        "gate->bybit": {
+          "trades": 233,
+          "pnl": -0.2977
+        },
+        "binance->gate": {
+          "trades": 26,
+          "pnl": -6.6616
+        },
+        "bybit->okx": {
+          "trades": 16,
+          "pnl": -0.3397
+        }
+      },
+      "by_cycle": {
+        "DOGE->USDT->BTC->DOGE": {
+          "trades": 21,
+          "pnl": 2.2521
+        },
+        "BTC->ETH->USDT->BTC": {
+          "trades": 4,
+          "pnl": 0.9385
+        },
+        "BTC->DOGE->USDT->BTC": {
+          "trades": 18,
+          "pnl": 5.4701
+        },
+        "USDT->ETH->BTC->USDT": {
+          "trades": 23,
+          "pnl": -1.9975
+        },
+        "USDT->ETH->XRP->USDT": {
+          "trades": 1,
+          "pnl": 0.1613
+        },
+        "USDT->BTC->DOGE->USDT": {
+          "trades": 24,
+          "pnl": 2.3889
+        },
+        "USDT->BTC->XRP->USDT": {
+          "trades": 26,
+          "pnl": -0.4773
+        },
+        "ADA->BTC->USDT->ADA": {
+          "trades": 29,
+          "pnl": -11.1708
+        },
+        "ADA->USDT->BTC->ADA": {
+          "trades": 1,
+          "pnl": -0.2575
+        },
+        "USDT->BTC->ETH->USDT": {
+          "trades": 17,
+          "pnl": 1.4939
+        },
+        "USDT->BTC->SOL->USDT": {
+          "trades": 5,
+          "pnl": -2.441
+        },
+        "USDT->DOGE->BTC->USDT": {
+          "trades": 49,
+          "pnl": -0.1019
+        },
+        "USDT->BNB->BTC->USDT": {
+          "trades": 6,
+          "pnl": 0.0178
+        },
+        "USDT->ETH->LINK->USDT": {
+          "trades": 2,
+          "pnl": -0.8354
+        },
+        "ETH->LINK->USDT->ETH": {
+          "trades": 2,
+          "pnl": -0.6106
+        },
+        "BTC->USDT->ETH->BTC": {
+          "trades": 5,
+          "pnl": 0.1098
+        },
+        "ADA->USDT->ETH->ADA": {
+          "trades": 1,
+          "pnl": -6.8544
+        },
+        "SOL->USDT->ETH->SOL": {
+          "trades": 1,
+          "pnl": -1.0647
+        },
+        "BTC->USDT->ADA->BTC": {
+          "trades": 1,
+          "pnl": -1.4952
+        },
+        "ETH->XRP->USDT->ETH": {
+          "trades": 1,
+          "pnl": -0.9009
+        },
+        "USDT->BTC->ADA->USDT": {
+          "trades": 1,
+          "pnl": -3.7569
+        },
+        "USDT->ETH->ADA->USDT": {
+          "trades": 2,
+          "pnl": -5.0136
+        },
+        "ETH->BTC->USDT->ETH": {
+          "trades": 22,
+          "pnl": 21.1271
+        },
+        "BNB->USDT->BTC->BNB": {
+          "trades": 452,
+          "pnl": 1.1353
+        },
+        "USDT->SOL->BTC->USDT": {
+          "trades": 5,
+          "pnl": -0.0558
+        },
+        "BNB->BTC->USDT->BNB": {
+          "trades": 131,
+          "pnl": 0.2518
+        },
+        "USDT->ETH->SOL->USDT": {
+          "trades": 3,
+          "pnl": -1.1758
+        },
+        "SOL->BTC->USDT->SOL": {
+          "trades": 2,
+          "pnl": -2.0095
+        },
+        "ETH->USDT->BTC->ETH": {
+          "trades": 2,
+          "pnl": 1.321
+        },
+        "SOL->BTC->BNB->SOL": {
+          "trades": 1,
+          "pnl": -0.8734
+        },
+        "BTC->SOL->USDT->BTC": {
+          "trades": 2,
+          "pnl": -0.7605
+        },
+        "USDT->SOL->ETH->USDT": {
+          "trades": 1,
+          "pnl": -2.2877
+        },
+        "USDT->ADA->BTC->USDT": {
+          "trades": 65,
+          "pnl": 0.0483
+        },
+        "XRP->USDT->BTC->XRP": {
+          "trades": 1,
+          "pnl": -1.189
+        },
+        "BTC->USDT->XRP->BTC": {
+          "trades": 89,
+          "pnl": 7.5621
+        },
+        "XRP->BTC->USDT->XRP": {
+          "trades": 1,
+          "pnl": -0.7077
+        },
+        "SOL->USDT->BTC->SOL": {
+          "trades": 2,
+          "pnl": -1.6768
+        },
+        "USDT->XRP->BTC->USDT": {
+          "trades": 2,
+          "pnl": -0.0016
+        },
+        "USDT->BTC->BNB->USDT": {
+          "trades": 82,
+          "pnl": -0.349
+        },
+        "BTC->USDT->DOGE->BTC": {
+          "trades": 1,
+          "pnl": -0.8079
+        },
+        "USDT->LINK->BTC->USDT": {
+          "trades": 1,
+          "pnl": -1.5357
+        },
+        "LINK->USDT->BTC->LINK": {
+          "trades": 2,
+          "pnl": -8.5542
+        }
+      },
+      "scenario": "Комиссия 0.01%, задержка 300мс",
+      "fee_pct": 0.01,
+      "fee_per_leg": 0.0001,
+      "latency_ms": 300,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029883,
+      "raw_cycles": 27652510,
+      "executable_candidates": 24,
+      "inventory_skips": 0,
+      "trades_executed": 24,
+      "direct_trades_executed": 21,
+      "triangular_trades_executed": 3,
+      "total_pnl_usdt": 29.341128286219792,
+      "direct_pnl_usdt": 16.503493209103873,
+      "triangular_pnl_usdt": 12.83763507711592,
+      "total_return_pct": 0.013040501460537257,
+      "final_capital": 225029.3411282862,
+      "avg_trade_pnl": 1.2225470119258246,
+      "by_type": {
+        "direct": {
+          "trades": 21,
+          "pnl": 16.5035
+        },
+        "triangle": {
+          "trades": 3,
+          "pnl": 12.8376
+        }
+      },
+      "by_route": {
+        "gate->okx": {
+          "trades": 1,
+          "pnl": 1.3037
+        },
+        "binance->okx": {
+          "trades": 4,
+          "pnl": 4.5538
+        },
+        "binance->bybit": {
+          "trades": 3,
+          "pnl": 2.8289
+        },
+        "okx->binance": {
+          "trades": 2,
+          "pnl": 0.6455
+        },
+        "bybit->huobi": {
+          "trades": 2,
+          "pnl": 1.6811
+        },
+        "bybit->binance": {
+          "trades": 2,
+          "pnl": 1.6977
+        },
+        "huobi->bybit": {
+          "trades": 2,
+          "pnl": 0.7922
+        },
+        "okx->gate": {
+          "trades": 1,
+          "pnl": 0.2963
+        },
+        "gate->bybit": {
+          "trades": 2,
+          "pnl": 0.7981
+        },
+        "okx->bybit": {
+          "trades": 1,
+          "pnl": 0.6396
+        },
+        "binance->huobi": {
+          "trades": 1,
+          "pnl": 1.2666
+        }
+      },
+      "by_cycle": {
+        "ADA->USDT->ETH->ADA": {
+          "trades": 1,
+          "pnl": 6.6067
+        },
+        "XRP->USDT->ETH->XRP": {
+          "trades": 1,
+          "pnl": 4.7119
+        },
+        "BTC->LINK->USDT->BTC": {
+          "trades": 1,
+          "pnl": 1.519
+        }
+      },
+      "scenario": "Комиссия 0.1%, без задержки",
+      "fee_pct": 0.1,
+      "fee_per_leg": 0.001,
+      "latency_ms": 0,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029878,
+      "raw_cycles": 27652480,
+      "executable_candidates": 24,
+      "inventory_skips": 0,
+      "trades_executed": 24,
+      "direct_trades_executed": 21,
+      "triangular_trades_executed": 3,
+      "total_pnl_usdt": -28.3556747151614,
+      "direct_pnl_usdt": -24.36390029537779,
+      "triangular_pnl_usdt": -3.99177441978361,
+      "total_return_pct": -0.012602522095628288,
+      "final_capital": 224971.64432528484,
+      "avg_trade_pnl": -1.1814864464650583,
+      "by_type": {
+        "direct": {
+          "trades": 21,
+          "pnl": -24.3639
+        },
+        "triangle": {
+          "trades": 3,
+          "pnl": -3.9918
+        }
+      },
+      "by_route": {
+        "gate->okx": {
+          "trades": 1,
+          "pnl": -3.1266
+        },
+        "binance->okx": {
+          "trades": 4,
+          "pnl": -3.2305
+        },
+        "binance->bybit": {
+          "trades": 3,
+          "pnl": -2.1344
+        },
+        "okx->binance": {
+          "trades": 2,
+          "pnl": -3.7416
+        },
+        "bybit->huobi": {
+          "trades": 2,
+          "pnl": -5.2138
+        },
+        "bybit->binance": {
+          "trades": 2,
+          "pnl": -3.5016
+        },
+        "huobi->bybit": {
+          "trades": 2,
+          "pnl": -3.9183
+        },
+        "okx->gate": {
+          "trades": 1,
+          "pnl": -1.46
+        },
+        "gate->bybit": {
+          "trades": 2,
+          "pnl": 0.4896
+        },
+        "okx->bybit": {
+          "trades": 1,
+          "pnl": 0.3784
+        },
+        "binance->huobi": {
+          "trades": 1,
+          "pnl": 1.0949
+        }
+      },
+      "by_cycle": {
+        "ADA->USDT->ETH->ADA": {
+          "trades": 1,
+          "pnl": 0.6072
+        },
+        "XRP->USDT->ETH->XRP": {
+          "trades": 1,
+          "pnl": -3.0686
+        },
+        "BTC->LINK->USDT->BTC": {
+          "trades": 1,
+          "pnl": -1.5304
+        }
+      },
+      "scenario": "Комиссия 0.1%, задержка 100мс",
+      "fee_pct": 0.1,
+      "fee_per_leg": 0.001,
+      "latency_ms": 100,
+      "max_quote_age_ms": 250
+    },
+    {
+      "grid_points": 864002,
+      "raw_cross_candidates": 5029868,
+      "raw_cycles": 27652414,
+      "executable_candidates": 24,
+      "inventory_skips": 0,
+      "trades_executed": 24,
+      "direct_trades_executed": 21,
+      "triangular_trades_executed": 3,
+      "total_pnl_usdt": -52.30171629773997,
+      "direct_pnl_usdt": -32.21097694183209,
+      "triangular_pnl_usdt": -20.090739355907886,
+      "total_return_pct": -0.023245207243438593,
+      "final_capital": 224947.69828370225,
+      "avg_trade_pnl": -2.179238179072499,
+      "by_type": {
+        "direct": {
+          "trades": 21,
+          "pnl": -32.211
+        },
+        "triangle": {
+          "trades": 3,
+          "pnl": -20.0907
+        }
+      },
+      "by_route": {
+        "gate->okx": {
+          "trades": 1,
+          "pnl": -2.5569
+        },
+        "binance->okx": {
+          "trades": 4,
+          "pnl": -5.6134
+        },
+        "binance->bybit": {
+          "trades": 3,
+          "pnl": -2.3325
+        },
+        "okx->binance": {
+          "trades": 2,
+          "pnl": -3.8493
+        },
+        "bybit->huobi": {
+          "trades": 2,
+          "pnl": -6.3275
+        },
+        "bybit->binance": {
+          "trades": 2,
+          "pnl": -3.7117
+        },
+        "huobi->bybit": {
+          "trades": 2,
+          "pnl": -5.0821
+        },
+        "okx->gate": {
+          "trades": 1,
+          "pnl": -1.6623
+        },
+        "gate->bybit": {
+          "trades": 2,
+          "pnl": 0.56
+        },
+        "okx->bybit": {
+          "trades": 1,
+          "pnl": 0.1174
+        },
+        "binance->huobi": {
+          "trades": 1,
+          "pnl": -1.7527
+        }
+      },
+      "by_cycle": {
+        "ADA->USDT->ETH->ADA": {
+          "trades": 1,
+          "pnl": -8.652
+        },
+        "XRP->USDT->ETH->XRP": {
+          "trades": 1,
+          "pnl": -4.1118
+        },
+        "BTC->LINK->USDT->BTC": {
+          "trades": 1,
+          "pnl": -7.327
+        }
+      },
+      "scenario": "Комиссия 0.1%, задержка 300мс",
+      "fee_pct": 0.1,
+      "fee_per_leg": 0.001,
+      "latency_ms": 300,
+      "max_quote_age_ms": 250
+    }
+  ]
+}

@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Крипто-арбитраж · Форд–Беллман · L2</title>
+
+<!-- ===== FONTS (Google Fonts) – distinctive editorial/financial pairing ===== -->
+<!-- Fraunces: characterful display serif · Hanken Grotesk: clean body · JetBrains Mono: data -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,900&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+/* ===========================================
+   THEME – light "financial broadsheet"
+   Edit these CSS variables to retheme the deck
+   =========================================== */
+:root{
+  --paper:#F4EFE5;          /* warm paper background */
+  --paper-2:#ECE4D5;        /* panel / card */
+  --paper-3:#E3D9C6;        /* deeper panel */
+  --ink:#1B1610;            /* near-black ink */
+  --ink-soft:#6A5F4E;       /* muted ink */
+  --ink-faint:#9A8E78;      /* faint labels */
+  --rust:#C2521A;           /* primary accent (echoes original orange arrows) */
+  --rust-deep:#9C3F12;
+  --green:#1F6B4A;          /* positive / data */
+  --red:#B23A26;            /* negative / loss */
+  --rule:rgba(27,22,16,.15);
+  --rule-strong:rgba(27,22,16,.35);
+
+  --stage-bg:#15110b;       /* letterbox behind the paper */
+  --slide-bg:var(--paper);
+
+  --font-display:'Fraunces',Georgia,serif;
+  --font-body:'Hanken Grotesk',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+
+  --ease:cubic-bezier(.16,1,.3,1);
+  --dur:.7s;
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+
+/* ===========================================
+   FIXED 16:9 STAGE – MANDATORY BASE (viewport-base.css, full)
+   =========================================== */
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:var(--stage-bg,#000);}
+.deck-viewport{position:fixed;inset:0;overflow:hidden;background:var(--stage-bg,#000);}
+.deck-stage{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;transform-origin:0 0;background:var(--slide-bg,#fff);}
+.slide{position:absolute;inset:0;width:1920px;height:1080px;overflow:hidden;display:block;visibility:hidden;opacity:0;pointer-events:none;background:var(--slide-bg,#fff);}
+.slide.active,.slide.visible{visibility:visible;opacity:1;pointer-events:auto;z-index:1;}
+img,video,canvas,svg{max-width:100%;max-height:100%;}
+.deck-controls{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:1000;}
+@media print{
+  html,body{width:1920px;height:auto;overflow:visible;background:#fff;}
+  .deck-viewport{position:static;overflow:visible;background:#fff;}
+  .deck-stage{position:static;width:auto;height:auto;transform:none !important;background:none;}
+  .slide{position:relative;display:block !important;visibility:visible !important;opacity:1 !important;pointer-events:auto !important;width:1920px;height:1080px;break-after:page;page-break-after:always;}
+  .slide:last-child{break-after:auto;page-break-after:auto;}
+  .deck-controls{display:none !important;}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;transition-duration:.2s !important;}
+}
+
+/* ===========================================
+   PAPER ATMOSPHERE – grid + grain
+   =========================================== */
+.slide{
+  font-family:var(--font-body);
+  color:var(--ink);
+  background:var(--paper);
+  background-image:
+    linear-gradient(var(--rule) 1px,transparent 1px),
+    linear-gradient(90deg,var(--rule) 1px,transparent 1px);
+  background-size:64px 64px;
+  background-position:-1px -1px;
+}
+/* faint vignette + grain overlay on every slide */
+.slide::after{
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(120% 90% at 80% 0%,rgba(194,82,26,.06),transparent 55%),
+    radial-gradient(100% 80% at 0% 100%,rgba(27,22,16,.05),transparent 60%),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/></svg>");
+}
+.slide>*{position:relative;z-index:1;}
+
+/* ===========================================
+   SHARED SLIDE CHROME (inside stage → scales with deck)
+   =========================================== */
+.pad{position:absolute;inset:0;padding:96px 120px 92px;}
+.kicker{
+  font-family:var(--font-mono);font-size:20px;letter-spacing:.32em;text-transform:uppercase;
+  color:var(--rust);font-weight:500;display:flex;align-items:center;gap:18px;
+}
+.kicker::before{content:"";width:46px;height:2px;background:var(--rust);display:inline-block;}
+.foot{
+  position:absolute;left:120px;right:120px;bottom:46px;display:flex;justify-content:space-between;
+  align-items:center;font-family:var(--font-mono);font-size:18px;color:var(--ink-faint);
+  letter-spacing:.12em;border-top:1px solid var(--rule);padding-top:18px;
+}
+.foot .pg{color:var(--ink-soft);font-weight:500;}
+
+h2.head{
+  font-family:var(--font-display);font-weight:600;font-size:78px;line-height:1.02;
+  letter-spacing:-.015em;color:var(--ink);margin:26px 0 6px;max-width:1500px;
+}
+h2.head em{font-style:italic;color:var(--rust);}
+.lead{font-size:30px;line-height:1.45;color:var(--ink-soft);max-width:1180px;font-weight:400;}
+
+/* ===========================================
+   REVEAL ANIMATION (staggered on active slide)
+   =========================================== */
+.reveal{opacity:0;transform:translateY(34px);
+  transition:opacity var(--dur) var(--ease),transform var(--dur) var(--ease);}
+.slide.visible .reveal{opacity:1;transform:none;}
+.slide.visible .reveal:nth-child(1){transition-delay:.06s;}
+.slide.visible .reveal:nth-child(2){transition-delay:.14s;}
+.slide.visible .reveal:nth-child(3){transition-delay:.22s;}
+.slide.visible .reveal:nth-child(4){transition-delay:.30s;}
+.slide.visible .reveal:nth-child(5){transition-delay:.38s;}
+.slide.visible .reveal:nth-child(6){transition-delay:.46s;}
+.slide.visible .reveal:nth-child(7){transition-delay:.54s;}
+.slide.visible .reveal:nth-child(8){transition-delay:.62s;}
+.r-d1{transition-delay:.3s !important;}
+.r-d2{transition-delay:.45s !important;}
+.r-d3{transition-delay:.6s !important;}
+
+/* ===========================================
+   TITLE SLIDE
+   =========================================== */
+.title-slide .pad{display:flex;flex-direction:column;justify-content:center;}
+.title-mark{font-family:var(--font-mono);font-size:22px;letter-spacing:.34em;color:var(--rust);
+  text-transform:uppercase;margin-bottom:34px;}
+.title-slide h1{
+  font-family:var(--font-display);font-weight:600;font-size:150px;line-height:.95;
+  letter-spacing:-.03em;color:var(--ink);max-width:1500px;
+}
+.title-slide h1 em{font-style:italic;color:var(--rust);}
+.title-sub{font-size:36px;line-height:1.4;color:var(--ink-soft);margin-top:40px;max-width:1100px;font-weight:400;}
+.title-meta{margin-top:64px;display:flex;gap:48px;font-family:var(--font-mono);font-size:20px;
+  color:var(--ink-soft);letter-spacing:.08em;flex-wrap:wrap;}
+.title-meta b{color:var(--ink);font-weight:700;}
+.title-rule{width:120px;height:5px;background:var(--rust);margin:8px 0 0;border-radius:3px;}
+
+/* big watermark formula on title */
+.title-wm{position:absolute;right:90px;bottom:70px;font-family:var(--font-mono);
+  font-size:30px;color:var(--rule-strong);letter-spacing:.02em;text-align:right;line-height:1.7;z-index:0;}
+.title-wm span{color:var(--rust);opacity:.5;}
+
+/* ===========================================
+   GENERIC LAYOUT HELPERS
+   =========================================== */
+.cols{display:grid;gap:48px;margin-top:48px;}
+.cols-2{grid-template-columns:1fr 1fr;}
+.cols-12{grid-template-columns:1.05fr .95fr;}
+.bullets{list-style:none;display:flex;flex-direction:column;gap:24px;margin-top:38px;}
+.bullets li{display:flex;gap:20px;font-size:28px;line-height:1.4;color:var(--ink);max-width:980px;}
+.bullets li .bx{flex:0 0 auto;font-family:var(--font-mono);color:var(--rust);font-weight:700;font-size:24px;margin-top:4px;}
+.bullets li b{font-weight:700;}
+
+.card{background:var(--paper-2);border:1px solid var(--rule);border-radius:14px;padding:34px 36px;
+  box-shadow:0 1px 0 rgba(255,255,255,.5) inset;}
+.card h3{font-family:var(--font-display);font-weight:600;font-size:32px;margin-bottom:14px;letter-spacing:-.01em;}
+.card p{font-size:24px;line-height:1.45;color:var(--ink-soft);}
+.tag{display:inline-block;font-family:var(--font-mono);font-size:16px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--rust);border:1px solid var(--rust);border-radius:999px;padding:5px 14px;}
+
+/* ===========================================
+   SLIDE 2 – graph triangle
+   =========================================== */
+.graph-wrap{display:flex;align-items:center;justify-content:center;}
+.node{fill:var(--paper-2);stroke:var(--ink);stroke-width:3;}
+.node-lbl{font-family:var(--font-mono);font-weight:700;font-size:30px;fill:var(--ink);}
+.edge{stroke:var(--rust);stroke-width:9;fill:none;marker-end:url(#ah);}
+.edge-lbl{font-family:var(--font-mono);font-size:22px;fill:var(--rust-deep);}
+.formula-box{background:var(--paper-2);border:1px solid var(--rule);border-left:5px solid var(--rust);
+  border-radius:0 12px 12px 0;padding:26px 30px;font-family:var(--font-mono);font-size:26px;
+  line-height:1.7;color:var(--ink);margin-top:14px;}
+.formula-box .c{color:var(--rust-deep);font-weight:700;}
+.formula-box small{color:var(--ink-soft);font-size:20px;}
+
+/* ===========================================
+   SLIDE 3 – L2 order book ladder
+   =========================================== */
+.ob{font-family:var(--font-mono);background:var(--paper-2);border:1px solid var(--rule);border-radius:14px;
+  padding:24px 26px;width:100%;}
+.ob-h{display:flex;justify-content:space-between;font-size:17px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-faint);padding:0 10px 12px;border-bottom:1px solid var(--rule);}
+.ob-row{position:relative;display:flex;justify-content:space-between;align-items:center;
+  padding:9px 12px;font-size:22px;border-radius:6px;margin-top:4px;overflow:hidden;}
+.ob-row .px{font-weight:700;z-index:1;}
+.ob-row .sz{color:var(--ink-soft);z-index:1;}
+.ob-row .bar{position:absolute;top:0;bottom:0;right:0;z-index:0;opacity:.9;}
+.ask .px{color:var(--red);} .ask .bar{background:rgba(178,58,38,.14);}
+.bid .px{color:var(--green);} .bid .bar{background:rgba(31,107,74,.16);}
+.ob-spread{display:flex;justify-content:space-between;font-size:18px;color:var(--ink-soft);
+  padding:14px 12px;margin:8px 0;border-top:1px dashed var(--rule);border-bottom:1px dashed var(--rule);}
+.ob-spread b{color:var(--rust);}
+.lvl{display:flex;gap:14px;margin-top:30px;}
+.lvl div{flex:1;background:var(--paper-2);border:1px solid var(--rule);border-radius:12px;padding:20px 22px;}
+.lvl h4{font-family:var(--font-mono);font-size:19px;letter-spacing:.1em;color:var(--rust);margin-bottom:8px;}
+.lvl p{font-size:21px;line-height:1.4;color:var(--ink-soft);}
+.lvl .now{border-color:var(--rust);background:#F6E7DA;}
+
+/* ===========================================
+   SLIDE 4 – architecture flow (pipeline + branch)
+   =========================================== */
+.flow{display:flex;align-items:flex-start;gap:16px;margin-top:50px;}
+/* center the flow vertically in the space below the heading */
+.pad-flow{display:flex;flex-direction:column;}
+.pad-flow .flow{margin-top:auto;margin-bottom:auto;}
+.stage{flex:1;display:flex;flex-direction:column;gap:14px;min-width:0;}
+.stage-branch{flex:1.5;}
+.stage-k{font-family:var(--font-mono);font-size:17px;letter-spacing:.16em;text-transform:uppercase;color:var(--rust);}
+.fcard{background:var(--paper-2);border:1px solid var(--rule);border-radius:14px;padding:24px;}
+.fcard.core{border-color:var(--rust);background:#F6E7DA;}
+.fcard h3{font-family:var(--font-display);font-weight:600;font-size:26px;margin-bottom:9px;letter-spacing:-.01em;}
+.fcard p{font-size:20px;line-height:1.38;color:var(--ink-soft);}
+.fcard .mono{font-family:var(--font-mono);font-size:16px;color:var(--ink-faint);margin-top:12px;display:block;}
+.fcard.mini{padding:18px 22px;}
+.fcard.mini h3{font-size:22px;margin-bottom:6px;}
+.fcard.mini p{font-size:18px;}
+.branch{display:flex;flex-direction:column;gap:14px;}
+.farrow{align-self:flex-start;margin-top:104px;font-size:36px;color:var(--rust);font-weight:700;}
+.cost-band{margin-top:46px;padding-top:24px;border-top:1px solid var(--rule-strong);
+  display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;}
+.cost-band .cb-k{font-family:var(--font-mono);font-size:17px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--rust-deep);font-weight:700;}
+.cost-band .cb-note{font-family:var(--font-body);font-size:19px;color:var(--ink-faint);font-style:italic;}
+.cost-band .cb-list{font-family:var(--font-mono);font-size:19px;color:var(--ink);letter-spacing:.01em;}
+.cost-band .cb-list b{color:var(--rust-deep);font-weight:400;}
+
+/* ===========================================
+   SLIDE 5 – results tables
+   =========================================== */
+.res-grid{display:grid;grid-template-columns:1fr 1fr;gap:42px;margin-top:30px;}
+.rtbl{width:100%;border-collapse:collapse;font-size:22px;}
+.rtbl caption{text-align:left;font-family:var(--font-display);font-weight:600;font-size:30px;margin-bottom:16px;}
+.rtbl th{font-family:var(--font-mono);font-size:16px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);text-align:left;padding:10px 12px;border-bottom:2px solid var(--rule-strong);font-weight:500;}
+.rtbl td{padding:13px 12px;border-bottom:1px solid var(--rule);}
+.rtbl td.num{font-family:var(--font-mono);text-align:right;font-weight:500;}
+.pos{color:var(--green);font-weight:700;}
+.neg{color:var(--red);font-weight:700;}
+.zero{color:var(--ink-soft);}
+.badge-prelim{display:inline-flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:18px;
+  letter-spacing:.1em;color:var(--rust-deep);background:#F6E3D3;border:1px dashed var(--rust);
+  border-radius:999px;padding:8px 18px;text-transform:uppercase;}
+.note-line{margin-top:26px;font-size:21px;color:var(--ink-soft);font-style:italic;}
+/* results matrix (fee × latency) */
+.setup-line{font-family:var(--font-mono);font-size:18px;color:var(--ink-soft);margin-top:16px;letter-spacing:.01em;}
+.matrix{border-collapse:collapse;margin-top:30px;width:100%;}
+.matrix th,.matrix td{padding:16px 20px;border-bottom:1px solid var(--rule);}
+.matrix thead th{font-family:var(--font-mono);font-size:17px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-faint);border-bottom:2px solid var(--rule-strong);font-weight:500;text-align:center;}
+.matrix thead th:first-child{text-align:left;color:var(--rust);}
+.matrix tbody th{text-align:left;font-family:var(--font-display);font-weight:600;font-size:26px;color:var(--ink);white-space:nowrap;}
+.matrix tbody th small{display:block;font-family:var(--font-mono);font-size:15px;color:var(--ink-faint);
+  font-weight:400;margin-top:3px;letter-spacing:.03em;}
+.matrix td{font-family:var(--font-mono);font-size:27px;font-weight:500;text-align:center;}
+.matrix td.pos{color:var(--green);} .matrix td.neg{color:var(--red);}
+.takeaways{display:flex;gap:44px;margin-top:34px;}
+.takeaways div{flex:1;font-size:22px;line-height:1.42;color:var(--ink);border-left:3px solid var(--rust);padding-left:20px;}
+.takeaways b{color:var(--rust-deep);}
+.prelim-note{margin-top:24px;font-family:var(--font-mono);font-size:16px;color:var(--ink-faint);letter-spacing:.04em;}
+/* equity-curve slide */
+.equity-wrap{margin-top:34px;display:flex;justify-content:center;}
+.equity-wrap img{max-width:100%;max-height:620px;width:auto;height:auto;border-radius:10px;
+  border:1px solid var(--rule);box-shadow:0 6px 24px rgba(27,22,16,.10);}
+.equity-cap{margin-top:26px;font-size:23px;line-height:1.45;color:var(--ink-soft);max-width:1550px;}
+.equity-cap b{color:var(--ink);}
+
+/* ===========================================
+   SLIDE 6 – pros / cons
+   =========================================== */
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:46px;margin-top:42px;}
+.pc-col h3{font-family:var(--font-display);font-size:34px;font-weight:600;margin-bottom:24px;display:flex;align-items:center;gap:14px;}
+.pc-col.pro h3{color:var(--green);}
+.pc-col.con h3{color:var(--red);}
+.pc-col ul{list-style:none;display:flex;flex-direction:column;gap:18px;}
+.pc-col li{font-size:25px;line-height:1.38;display:flex;gap:14px;color:var(--ink);}
+.pc-col li .m{flex:0 0 auto;font-family:var(--font-mono);font-weight:700;}
+.pro li .m{color:var(--green);} .con li .m{color:var(--red);}
+.pc-col li small{display:block;color:var(--ink-faint);font-size:19px;margin-top:2px;}
+
+/* ===========================================
+   SLIDE 7 – future
+   =========================================== */
+.fut{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:26px;margin-top:42px;}
+.fut .card{position:relative;}
+.fut .card.hero{grid-row:span 1;background:#F6E7DA;border-color:var(--rust);}
+.fut .num{font-family:var(--font-mono);font-size:18px;color:var(--rust);letter-spacing:.12em;}
+.fut .card h3{font-size:28px;margin:8px 0 10px;}
+.fut .card p{font-size:21px;line-height:1.42;}
+
+/* ===========================================
+   SLIDE 8 – closing
+   =========================================== */
+.close-quote{font-family:var(--font-display);font-weight:500;font-size:60px;line-height:1.12;
+  letter-spacing:-.02em;max-width:1450px;margin-top:30px;}
+.close-quote em{font-style:italic;color:var(--rust);}
+.refs{margin-top:54px;display:grid;grid-template-columns:1fr 1fr;gap:14px 60px;max-width:1400px;}
+.refs div{font-family:var(--font-mono);font-size:20px;color:var(--ink-soft);padding:10px 0;border-top:1px solid var(--rule);}
+.refs span{color:var(--rust);}
+
+/* ===========================================
+   DECK CHROME OUTSIDE STAGE (scales via clamp)
+   =========================================== */
+.progress{position:fixed;top:0;left:0;height:4px;background:var(--rust);z-index:1000;
+  width:0;transition:width .4s var(--ease);}
+.counter{position:fixed;right:clamp(14px,2vw,30px);bottom:clamp(12px,2vh,24px);z-index:1000;
+  font-family:var(--font-mono);font-size:clamp(13px,1.3vw,16px);color:var(--ink-soft);
+  background:rgba(244,239,229,.85);border:1px solid var(--rule);border-radius:999px;
+  padding:6px 14px;letter-spacing:.1em;backdrop-filter:blur(4px);}
+.counter b{color:var(--rust);}
+.hint{position:fixed;left:clamp(14px,2vw,30px);bottom:clamp(12px,2vh,24px);z-index:1000;
+  font-family:var(--font-mono);font-size:clamp(11px,1.1vw,14px);color:var(--ink-faint);letter-spacing:.06em;}
+
+/* inline edit affordance */
+.edit-hotzone{position:fixed;top:0;left:0;width:80px;height:80px;z-index:10000;cursor:pointer;}
+.edit-toggle{position:fixed;top:16px;left:16px;z-index:10001;opacity:0;pointer-events:none;
+  transition:opacity .3s ease;font-size:20px;background:var(--paper-2);border:1px solid var(--rule-strong);
+  border-radius:10px;padding:8px 12px;cursor:pointer;}
+.edit-toggle.show,.edit-toggle.active{opacity:1;pointer-events:auto;}
+.edit-toggle.active{background:var(--rust);color:#fff;border-color:var(--rust);}
+[contenteditable="true"]{outline:2px dashed var(--rust);outline-offset:4px;border-radius:4px;cursor:text;}
+.edit-banner{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10001;
+  font-family:var(--font-mono);font-size:14px;background:var(--rust);color:#fff;padding:7px 16px;
+  border-radius:999px;opacity:0;pointer-events:none;transition:opacity .3s;}
+.edit-banner.show{opacity:1;}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<div class="deck-viewport">
+<main class="deck-stage" id="deckStage">
+
+  <!-- ============ SLIDE 1 · TITLE ============ -->
+  <section class="slide title-slide active">
+    <div class="pad">
+      <h1 class="reveal">Крипто-арбитраж<br>через <em>Форда–Беллмана</em></h1>
+      <div class="title-rule reveal"></div>
+      <p class="title-sub reveal">Грицаев Андрей, Бугрышев Михаил</p>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 2 · SETUP / IDEA ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Основная <em>идея</em></h2>
+      <div class="cols cols-12">
+        <div>
+          <ul class="bullets">
+            <li class="reveal"><span class="bx">◦</span><span><b>Вершины</b> – криптовалюты (BTC, ETH, SOL, USDT …).</span></li>
+            <li class="reveal"><span class="bx">◦</span><span><b>Рёбра</b> – направленный обмен с курсом <i>r</i> и комиссией <i>f</i>.</span></li>
+            <li class="reveal"><span class="bx">◦</span><span>Цикл обменов, дающий <b>больше валюты, чем вложили</b> → прибыль.</span></li>
+          </ul>
+          <div class="formula-box reveal r-d1">
+            w(u,v) = <span class="c">−ln</span>(r<sub>uv</sub>·(1−f<sub>uv</sub>))<br>
+            Πr &gt; 1 <span class="c">⇔</span> Σw &lt; 0<br>
+            <small>Прибыльный цикл ⇔ отрицательный цикл → ищется <b>Фордом–Беллманом</b>.</small>
+          </div>
+        </div>
+        <div class="graph-wrap reveal r-d1">
+          <svg viewBox="0 0 560 480" width="560" height="480" aria-label="Граф обменов BTC ETH SOL">
+            <defs>
+              <marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 Z" fill="#C2521A"/>
+              </marker>
+            </defs>
+            <!-- edges (orange, echo original) -->
+            <path class="edge" d="M300,120 Q430,200 410,300"/>
+            <path class="edge" d="M380,360 Q280,420 200,360"/>
+            <path class="edge" d="M150,300 Q120,190 250,120"/>
+            <text class="edge-lbl" x="445" y="215">r₁</text>
+            <text class="edge-lbl" x="270" y="445">r₂</text>
+            <text class="edge-lbl" x="70" y="215">r₃</text>
+            <!-- nodes -->
+            <circle class="node" cx="280" cy="95" r="56"/><text class="node-lbl" x="280" y="104" text-anchor="middle">BTC</text>
+            <circle class="node" cx="430" cy="345" r="56"/><text class="node-lbl" x="430" y="354" text-anchor="middle">ETH</text>
+            <circle class="node" cx="135" cy="345" r="56"/><text class="node-lbl" x="135" y="354" text-anchor="middle">SOL</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 3 · WHAT IS L2 ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Что такое <em>L2 order book</em></h2>
+      <div class="cols cols-12">
+        <div>
+          <p class="lead reveal">Order book (стакан) – список активных заявок на покупку и продажу. Уровни детализации:</p>
+          <div class="lvl">
+            <div class="reveal r-d1"><h4>L1</h4><p>Только лучшие bid / ask – одна строка с каждой стороны.</p></div>
+            <div class="now reveal r-d1"><h4>L2 · здесь</h4><p>Несколько ценовых уровней вглубь + объёмы → <b>глубина рынка</b>.</p></div>
+            <div class="reveal r-d2"><h4>L3</h4><p>Каждый ордер по ID и очередь внутри уровня.</p></div>
+          </div>
+          <p class="lead reveal r-d2" style="margin-top:30px;font-size:26px;">Зачем для арбитража: крупная заявка «съедает» уровни → реальная средняя цена хуже лучшей. Это <b>проскальзывание</b>, и посчитать его можно только по L2 – проходом по стакану.</p>
+        </div>
+        <div class="reveal r-d1">
+          <div class="ob">
+            <div class="ob-h"><span>BTC / USDT · book</span><span>price · size</span></div>
+            <div class="ob-row ask"><span class="bar" style="width:42%"></span><span class="px">76 345.3</span><span class="sz">2.27</span></div>
+            <div class="ob-row ask"><span class="bar" style="width:30%"></span><span class="px">76 345.0</span><span class="sz">0.51</span></div>
+            <div class="ob-row ask"><span class="bar" style="width:14%"></span><span class="px">76 344.8</span><span class="sz">0.01</span></div>
+            <div class="ob-row ask"><span class="bar" style="width:60%"></span><span class="px">76 344.62</span><span class="sz">1.72</span></div>
+            <div class="ob-spread"><span>spread</span><span><b>0.02</b> · 0.3 bp</span></div>
+            <div class="ob-row bid"><span class="bar" style="width:34%"></span><span class="px">76 344.60</span><span class="sz">0.66</span></div>
+            <div class="ob-row bid"><span class="bar" style="width:18%"></span><span class="px">76 344.58</span><span class="sz">0.14</span></div>
+            <div class="ob-row bid"><span class="bar" style="width:24%"></span><span class="px">76 344.57</span><span class="sz">0.19</span></div>
+            <div class="ob-row bid"><span class="bar" style="width:48%"></span><span class="px">76 342.70</span><span class="sz">1.31</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 4 · WHAT'S IMPLEMENTED ============ -->
+  <section class="slide">
+    <div class="pad pad-flow">
+      <h2 class="head reveal">Архитектура</h2>
+      <div class="flow">
+        <div class="stage reveal">
+          <div class="stage-k">Данные</div>
+          <div class="fcard"><h3>Котировки</h3><p>5m-свечи Binance / Bybit / OKX + бесплатный L2-стакан Tardis.dev.</p><span class="mono">data.py · tardis_data.py</span></div>
+        </div>
+        <div class="farrow reveal">→</div>
+        <div class="stage reveal">
+          <div class="stage-k">Ядро</div>
+          <div class="fcard core"><h3>Граф + Форд–Беллман</h3><p>Веса −ln(r·(1−f)); поиск отрицательных циклов и перебор треугольников.</p><span class="mono">graph.py · bellman_ford.py</span></div>
+        </div>
+        <div class="farrow reveal">→</div>
+        <div class="stage stage-branch reveal">
+          <div class="stage-k">Два бэктеста</div>
+          <div class="branch">
+            <div class="fcard mini"><h3>Свечной · 5m</h3><p>Грубая разведка: сигнал t → сделка t+1, без look-ahead.</p><span class="mono">backtest.py · cross_exchange.py</span></div>
+            <div class="fcard mini"><h3>L2 · по стакану</h3><p>Честная проверка: проход по книге, латентность в мс (t → t+Δ).</p><span class="mono">tardis_backtest.py</span></div>
+          </div>
+        </div>
+        <div class="farrow reveal">→</div>
+        <div class="stage reveal">
+          <div class="stage-k">Выход</div>
+          <div class="fcard"><h3>Метрики / PnL</h3><p>Equity-кривая, доходность, число сделок; отчёты CSV / JSON.</p><span class="mono">results/ · summary</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 5 · RESULTS (PRELIMINARY) ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal"><em>Результаты</em></h2>
+      <p class="setup-line reveal">BTC / ETH · Binance / Bybit / OKX</p>
+      <table class="matrix reveal r-d1">
+        <thead>
+          <tr><th>Доходность/сутки</th><th>0 мс</th><th>100 мс</th><th>300 мс</th><th>500 мс</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Комиссия 0%<small>284 сделки</small></th><td class="pos">+0.196%</td><td class="pos">+0.068%</td><td class="pos">+0.026%</td><td class="pos">+0.017%</td></tr>
+          <tr><th>Комиссия 0.01%<small>112 сделок</small></th><td class="pos">+0.085%</td><td class="pos">+0.020%</td><td class="neg">−0.003%</td><td class="neg">−0.009%</td></tr>
+          <tr><th>Комиссия 0.10%<small>1 сделка</small></th><td class="pos">+0.001%</td><td class="pos">+0.001%</td><td class="neg">−0.002%</td><td class="neg">−0.003%</td></tr>
+        </tbody>
+      </table>
+      <div class="takeaways reveal r-d2">
+        <div><b>Комиссия &gt; задержка.</b> При комиссии 0.1% находим всего 1 сделку за сутки, при 0.01% – 112, без комиссии – 284.</div>
+        <div><b>Задержка убивает прибыль:</b> при 0.01% любая латентность ≥300 мс уводит в минус – нужно строить серьёзную инфраструктуру для торговли с низкими задержками.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 5b · EQUITY CURVE ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Кривая <em>капитала</em></h2>
+      <div class="equity-wrap reveal r-d1">
+        <img src="results/equity_direct_lat100.png" alt="Кривая капитала — межбиржевой L2, задержка 100 мс, 2026-06-01">
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 5c · COMBINED RESULTS ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Результаты · <em>combined</em></h2>
+      <p class="setup-line reveal">direct + треугольный · BTC / ETH + кросс-пары (ETH/BTC…) · Binance / Bybit / OKX · старт ≈ 45 000 USDT</p>
+      <table class="matrix reveal r-d1">
+        <thead>
+          <tr><th>Доходность/сутки</th><th>0 мс</th><th>100 мс</th><th>300 мс</th><th>500 мс</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Комиссия 0%<small>≈197 direct + 340 тр.</small></th><td class="pos">+0.844%</td><td class="pos">+0.596%</td><td class="pos">+0.340%</td><td class="pos">+0.275%</td></tr>
+          <tr><th>Комиссия 0.01%<small>≈85 direct + 14 тр.</small></th><td class="pos">+0.104%</td><td class="pos">+0.027%</td><td class="pos">+0.002%</td><td class="neg">−0.014%</td></tr>
+          <tr><th>Комиссия 0.10%<small>1 direct + 0 тр.</small></th><td class="pos">+0.001%</td><td class="pos">+0.001%</td><td class="neg">−0.002%</td><td class="neg">−0.003%</td></tr>
+        </tbody>
+      </table>
+      <div class="takeaways reveal r-d2">
+        <div><b>Треугольник – главный апсайд.</b> Combined +0.844% против direct +0.196% без комиссий (≈×4); почти весь прирост дают треугольные циклы внутри биржи.</div>
+        <div><b>Под комиссией осыпается быстрее.</b> При 0.01% вклад треугольника уже мал, при 0.10% – ноль треугольных сделок. Вывод тот же: прибыль только при near-zero издержках.</div>
+      </div>
+      <p class="prelim-note reveal r-d3">Та же база ≈45 000 USDT, что и у direct, – цифры сравнимы напрямую.</p>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 5d · COMBINED EQUITY ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Кривая капитала · <em>combined</em></h2>
+      <div class="equity-wrap reveal r-d1">
+        <img src="results/equity_combined_lat100.png" alt="Кривая капитала — combined, задержка 100 мс, 2026-06-01">
+      </div>
+      <p class="equity-cap reveal r-d2">Основной вклад дают циклы из трёх валют внутри биржи. При 0.01% (рыжая) и 0.10% (серая) всё равно кривые почти прижаты к старту.</p>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 5e · 6-MONTH RESULTS ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Результаты · <em>6 месяцев</em></h2>
+      <p class="setup-line reveal">1-е число каждого месяца 2026 · 8 монет × 5 бирж · direct + треугольники (≤3) · инвентарь ≈ 225 000 USDT · доходность/сутки</p>
+      <table class="matrix reveal r-d1">
+        <thead>
+          <tr>
+            <th>Месяц</th>
+            <th>0% · 0 мс</th>
+            <th>0% · 300 мс</th>
+            <th>0.01% · 0 мс</th>
+            <th>0.01% · 100 мс</th>
+            <th>0.01% · 300 мс</th>
+            <th>0.10% · 100 мс</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th>Январь<small>4 774 сделки @0.01%</small></th><td class="pos">+0.298%</td><td class="pos">+0.066%</td><td class="pos">+0.073%</td><td class="zero">+0.000%</td><td class="neg">−0.023%</td><td class="neg">−0.007%</td></tr>
+          <tr><th>Февраль<small>6 899 сделок</small></th><td class="pos">+2.327%</td><td class="pos">+0.904%</td><td class="pos">+0.257%</td><td class="neg">−0.010%</td><td class="neg">−0.067%</td><td class="neg">−0.013%</td></tr>
+          <tr><th>Март<small>4 146 сделок</small></th><td class="pos">+1.801%</td><td class="pos">+0.739%</td><td class="pos">+0.287%</td><td class="pos">+0.073%</td><td class="neg">−0.015%</td><td class="neg">−0.008%</td></tr>
+          <tr><th>Апрель<small>16 228 сделок</small></th><td class="pos">+0.349%</td><td class="pos">+0.079%</td><td class="pos">+0.105%</td><td class="pos">+0.018%</td><td class="neg">−0.018%</td><td class="neg">−0.004%</td></tr>
+          <tr><th>Май<small>5 791 сделка</small></th><td class="pos">+0.481%</td><td class="pos">+0.191%</td><td class="pos">+0.059%</td><td class="pos">+0.009%</td><td class="neg">−0.008%</td><td class="neg">−0.004%</td></tr>
+          <tr><th>Июнь<small>182 160 сделок</small></th><td class="pos">+0.577%</td><td class="pos">+0.145%</td><td class="pos">+0.222%</td><td class="pos">+0.089%</td><td class="pos">+0.009%</td><td class="pos">+0.005%</td></tr>
+        </tbody>
+      </table>
+      <div class="takeaways reveal r-d2">
+        <div><b>Возможность есть каждый месяц</b> — без издержек +0.3…+2.3%/день; пики в феврале–марте (волатильность), там до 40% сделок — треугольники.</div>
+        <div><b>Реалистичный сценарий (0.01% · 100 мс) — около нуля:</b> в среднем +0.030%/день (~11% годовых), 4 месяца из 6 в плюсе. 300 мс или taker-комиссия 0.1% убивают edge почти всегда.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 6 · PROS / CONS ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Плюсы и <em>минусы</em></h2>
+      <div class="pc">
+        <div class="pc-col pro reveal r-d1">
+          <h3>＋ Плюсы</h3>
+          <ul>
+            <li><span class="m">+</span><span>Простота реализации, низкий порог входа (в т.ч. по железу).</span></li>
+            <li><span class="m">+</span><span>Возможность «относительно» честного бэктеста.</span></li>
+            <li><span class="m">+</span><span>Проверка на <b>реальном L2-стакане</b>, а не только на свечах.</span></li>
+            <li><span class="m">+</span><span>Честная модель: без look-ahead, с латентностью и инвентарём.</span></li>
+          </ul>
+        </div>
+        <div class="pc-col con reveal r-d2">
+          <h3>− Минусы</h3>
+          <ul>
+            <li><span class="m">−</span><span>Большая конкуренция; HFT-фонды забирают прибыль.</span></li>
+            <li><span class="m">−</span><span>Комиссии съедают edge – на ретейле прибыли нет.</span></li>
+            <li><span class="m">−</span><span>Чувствительность к задержке и проскальзыванию.</span></li>
+            <li><span class="m">−</span><span>Нужны короткие циклы; вывод/перевод между биржами медленный.</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 7 · FUTURE WORK ============ -->
+  <section class="slide">
+    <div class="pad">
+      <h2 class="head reveal">Что добавить в <em>будущем</em></h2>
+      <div class="fut">
+        <div class="card hero reveal r-d1"><div class="num">★ ПРИОРИТЕТ</div><h3>L3 order book</h3><p>Очередь заявок по ID + симулятор матчинг-движка → честная вероятность исполнения и поддержка maker-ордеров.</p></div>
+        <div class="card reveal r-d1"><div class="num">02</div><h3>Больше данных</h3><p>Несколько дней / тиковые данные вместо одного бесплатного дня Tardis.</p></div>
+        <div class="card reveal r-d2"><div class="num">03</div><h3>Ребалансировка</h3><p>Модель долива инвентаря и стоимости перевода между биржами.</p></div>
+        <div class="card reveal r-d2"><div class="num">04</div><h3>Maker-стратегии</h3><p>Лимитные заявки с ребейтами вместо taker – ниже комиссия, но риск неисполнения.</p></div>
+        <div class="card reveal r-d3"><div class="num">05</div><h3>Шире вселенная</h3><p>Больше монет и площадок, длинные циклы, риск-лимиты.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 8 · CLOSING ============ -->
+  <section class="slide">
+    <div class="pad" style="display:flex;flex-direction:column;justify-content:center;">
+      <p class="close-quote reveal">Расхождения цен <em>реальны и часты</em> – но крошечные. Заработать на них может лишь участник с near-zero комиссией и минимальной задержкой.</p>
+      <div class="refs reveal r-d2">
+        <div><span>›</span> Jansen – Machine Learning for Algorithmic Trading (2nd ed.)</div>
+        <div><span>›</span> e-maxx.ru/algo/ford_bellman</div>
+        <div><span>›</span> datasets.tardis.dev – free L2 order book</div>
+        <div><span>›</span> coinmarketcap.com</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<!-- deck chrome (outside stage) -->
+<div class="counter" id="counter"><b>01</b> / 08</div>
+<div class="hint">← → · Space · нажми E для редактирования</div>
+
+<!-- inline edit affordance -->
+<div class="edit-hotzone" id="editHotzone"></div>
+<button class="edit-toggle" id="editToggle" title="Режим редактирования (E)">✏️ edit</button>
+<div class="edit-banner" id="editBanner">Режим правки – клик по тексту · Ctrl+S сохранить</div>
+
+<script>
+/* ===========================================
+   SLIDE CONTROLLER – fixed 16:9 stage, nav, progress
+   =========================================== */
+class SlidePresentation{
+  constructor(){
+    this.slides=[...document.querySelectorAll('.slide')];
+    this.i=0;
+    this.stage=document.getElementById('deckStage');
+    this.counter=document.getElementById('counter');
+    this.progress=document.getElementById('progress');
+    this.scale();addEventListener('resize',()=>this.scale());
+    this.keys();this.touch();this.wheel();
+    this.show(0);
+  }
+  scale(){
+    const f=Math.min(innerWidth/1920,innerHeight/1080);
+    const x=(innerWidth-1920*f)/2, y=(innerHeight-1080*f)/2;
+    this.stage.style.transform=`translate(${x}px,${y}px) scale(${f})`;
+  }
+  show(n){
+    this.i=Math.max(0,Math.min(n,this.slides.length-1));
+    this.slides.forEach((s,k)=>{s.classList.toggle('active',k===this.i);s.classList.toggle('visible',k===this.i);});
+    const p=String(this.i+1).padStart(2,'0');
+    this.counter.innerHTML=`<b>${p}</b> / ${String(this.slides.length).padStart(2,'0')}`;
+    this.progress.style.width=((this.i)/(this.slides.length-1)*100)+'%';
+  }
+  next(){this.show(this.i+1);} prev(){this.show(this.i-1);}
+  keys(){
+    addEventListener('keydown',e=>{
+      if(e.target.getAttribute&&e.target.getAttribute('contenteditable')==='true')return;
+      if(['ArrowRight','ArrowDown',' ','PageDown'].includes(e.key)){e.preventDefault();this.next();}
+      else if(['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){e.preventDefault();this.prev();}
+      else if(e.key==='Home')this.show(0);
+      else if(e.key==='End')this.show(this.slides.length-1);
+    });
+  }
+  touch(){
+    let x0=null;
+    addEventListener('touchstart',e=>x0=e.touches[0].clientX,{passive:true});
+    addEventListener('touchend',e=>{if(x0===null)return;const dx=e.changedTouches[0].clientX-x0;
+      if(Math.abs(dx)>50){dx<0?this.next():this.prev();}x0=null;},{passive:true});
+  }
+  wheel(){
+    let lock=false;
+    addEventListener('wheel',e=>{if(lock)return;if(Math.abs(e.deltaY)<24)return;
+      lock=true;e.deltaY>0?this.next():this.prev();setTimeout(()=>lock=false,650);},{passive:true});
+  }
+}
+const deck=new SlidePresentation();
+
+/* ===========================================
+   INLINE EDITING (E key / hover hotzone) + localStorage
+   =========================================== */
+const DECK_KEY='deckHTML_v3';   /* bumped key → stale auto-saved copy is ignored */
+const EDIT_SEL=[
+  '.slide h1','.slide h2','.slide h3','.slide h4','.slide p','.slide li','.slide td','.slide th','.slide caption',
+  '.slide .lead','.slide .step','.slide .num','.slide .mono',
+  /* meta & chrome text */
+  '.slide .title-meta span','.slide .kicker','.slide .foot span','.slide .tag',
+  '.slide .badge-prelim','.slide .formula-box','.slide .edge-lbl','.slide .node-lbl','.slide .note-line'
+].join(',');
+const editor={
+  isActive:false,                 /* editing is OFF until the user presses E */
+  toggle(){
+    this.isActive=!this.isActive;
+    const t=document.getElementById('editToggle'),b=document.getElementById('editBanner');
+    document.querySelectorAll(EDIT_SEL).forEach(el=>el.setAttribute('contenteditable',this.isActive));
+    t.classList.toggle('active',this.isActive);t.classList.toggle('show',this.isActive);
+    b.classList.toggle('show',this.isActive);
+  },
+  save(){
+    /* save a CLEAN copy without contenteditable so reloads never start in edit mode */
+    const clone=document.getElementById('deckStage').cloneNode(true);
+    clone.querySelectorAll('[contenteditable]').forEach(e=>e.removeAttribute('contenteditable'));
+    localStorage.setItem(DECK_KEY,clone.innerHTML);
+    const b=document.getElementById('editBanner');b.textContent='Сохранено ✓';
+    setTimeout(()=>b.textContent='Режим правки – клик по тексту · Ctrl+S сохранить',1400);
+  }
+};
+/* NOTE: the HTML file is always the source of truth – we do NOT auto-restore from
+   localStorage on load, so a reload always shows the latest file. Inline edits (E)
+   are session-only; ask to bake lasting text changes into the file. */
+
+const hotzone=document.getElementById('editHotzone'),toggle=document.getElementById('editToggle');let hideT=null;
+hotzone.addEventListener('mouseenter',()=>{clearTimeout(hideT);toggle.classList.add('show');});
+hotzone.addEventListener('mouseleave',()=>{hideT=setTimeout(()=>{if(!editor.isActive)toggle.classList.remove('show');},400);});
+toggle.addEventListener('mouseenter',()=>clearTimeout(hideT));
+toggle.addEventListener('mouseleave',()=>{hideT=setTimeout(()=>{if(!editor.isActive)toggle.classList.remove('show');},400);});
+toggle.addEventListener('click',()=>editor.toggle());
+hotzone.addEventListener('click',()=>editor.toggle());
+addEventListener('keydown',e=>{
+  if((e.key==='e'||e.key==='E')&&e.target.getAttribute&&e.target.getAttribute('contenteditable')!=='true')editor.toggle();
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();editor.save();}
+});
+</script>
+</body>
+</html>

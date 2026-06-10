@@ -17,12 +17,21 @@ import pandas as pd
 
 DATASETS_BASE = "https://datasets.tardis.dev/v1"
 
-# Tardis exchange ids differ from ours: OKX is "okex", Bybit spot is "bybit-spot".
+# Tardis exchange ids differ from our friendly names.
 EXCHANGE_ID = {
     "binance": "binance",
     "bybit": "bybit-spot",
     "okx": "okex",
+    "gate": "gate-io",
+    "kucoin": "kucoin",
+    "huobi": "huobi",
+    "bitget": "bitget",
 }
+
+# Per-exchange spot symbol convention (verified against datasets.tardis.dev):
+#   okx, kucoin -> BASE-QUOTE ; gate -> BASE_QUOTE ; huobi -> lowercase basequote ;
+#   binance, bybit, bitget -> BASEQUOTE
+_SYMBOL_DASH = {"okx", "kucoin"}
 
 
 def pair_key(base: str, quote: str) -> str:
@@ -40,10 +49,16 @@ def normalize_pair(pair: str, default_quote: str = "USDT") -> Tuple[str, str]:
 
 
 def tardis_pair_symbol(exchange: str, base: str, quote: str) -> str:
-    """okex uses BASE-QUOTE (BTC-USDT); binance/bybit use BASEQUOTE (BTCUSDT)."""
+    """Exchange-specific spot symbol formatting for Tardis dataset URLs."""
     base = base.upper()
     quote = quote.upper()
-    return f"{base}-{quote}" if exchange == "okx" else f"{base}{quote}"
+    if exchange in _SYMBOL_DASH:
+        return f"{base}-{quote}"
+    if exchange == "gate":
+        return f"{base}_{quote}"
+    if exchange == "huobi":
+        return f"{base}{quote}".lower()
+    return f"{base}{quote}"
 
 
 def tardis_symbol(exchange: str, asset: str) -> str:
@@ -85,9 +100,27 @@ def download_pair_raw(
     date: str,
     raw_dir: Path,
     data_type: str = "book_snapshot_25",
+    timeout: float = 60.0,
+    retries: int = 3,
 ) -> Optional[Path]:
-    """Download the gzip CSV if not already cached. Returns path or None on failure."""
+    """Download the gzip CSV if not already cached. Returns path or None on failure.
+
+    Streams via urlopen with a hard socket timeout so a stalled connection fails
+    fast instead of hanging the whole run (urlretrieve has no timeout). Writes to
+    a .part file and renames on success, so a partial/aborted transfer is never
+    mistaken for a valid cache hit on the next run.
+    """
+    import shutil
+    import ssl
+    import urllib.error
     import urllib.request
+
+    try:
+        import certifi
+
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        ssl_ctx = ssl.create_default_context()
 
     raw_dir.mkdir(parents=True, exist_ok=True)
     sym = tardis_pair_symbol(exchange, base, quote)
@@ -95,13 +128,36 @@ def download_pair_raw(
     if out.exists() and out.stat().st_size > 1024:
         return out
     url = dataset_pair_url(exchange, base, quote, date, data_type)
-    try:
-        urllib.request.urlretrieve(url, out)  # noqa: S310 (trusted host)
-    except Exception as exc:  # noqa: BLE001
-        print(f"  download failed {exchange}/{base}{quote}: {exc}")
+    part = out.with_suffix(out.suffix + ".part")
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout, context=ssl_ctx) as resp, open(part, "wb") as fh:  # noqa: S310
+                shutil.copyfileobj(resp, fh, length=1 << 20)
+            part.replace(out)
+            break
+        except urllib.error.HTTPError as exc:
+            # 4xx (e.g. 404/400 = pair/date not offered) is permanent — don't retry.
+            part.unlink(missing_ok=True)
+            print(f"  download failed {exchange}/{base}{quote}: {exc}")
+            return None
+        except Exception as exc:  # noqa: BLE001  (timeout, connection reset, etc.)
+            part.unlink(missing_ok=True)
+            last_exc = exc
+            if attempt < retries:
+                print(f"  retry {attempt}/{retries} {exchange}/{base}{quote}: {exc}")
+                continue
+            print(f"  download failed {exchange}/{base}{quote}: {exc}")
+            return None
+    else:
+        if last_exc is not None:
+            print(f"  download failed {exchange}/{base}{quote}: {last_exc}")
         return None
+
     if out.stat().st_size < 1024:
         print(f"  too small, likely no data: {exchange}/{base}{quote} ({out.stat().st_size}b)")
+        out.unlink(missing_ok=True)
         return None
     return out
 

@@ -7,3 +7,7 @@ pptx_extracted/
 pptx_media/
 *.pyc
 .DS_Store
+
+# data and bulky per-tick artifacts
+data/
+results/*.csv
